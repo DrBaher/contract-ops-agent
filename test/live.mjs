@@ -1,8 +1,10 @@
 // Live integration tests (L1–L7): real Agent SDK sessions against the real
 // CLIs. Burns API/subscription usage — run via `npm run test:live`.
-import test from "node:test";
+import test, { after } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, rmSync } from "node:fs";
+import { existsSync, rmSync, mkdtempSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { query } from "@anthropic-ai/claude-agent-sdk";
@@ -16,7 +18,12 @@ const here = dirname(fileURLToPath(import.meta.url));
 const WORKSPACE = join(here, "..", "workspace");
 const CANARY = "/tmp/legal-harness-live-canary.txt";
 
-async function runLive({ prompt, decider = async () => true, mutateOptions, maxTurns = 25 }) {
+// convert_to_pdf needs a PDF backend (LibreOffice/soffice) beyond the CLI.
+let pdfBackend = false;
+try { execFileSync("which", ["soffice"], { stdio: "ignore" }); pdfBackend = true; } catch { /* skip L12 */ }
+const skipPdf = pdfBackend ? false : "no PDF backend (soffice) on this host";
+
+async function runLive({ prompt, decider = async () => true, mutateOptions, maxTurns = 25, workspace = WORKSPACE }) {
   const session = newSessionState();
   const gateEvents = [];
   const toolUses = [];
@@ -24,7 +31,7 @@ async function runLive({ prompt, decider = async () => true, mutateOptions, maxT
   let breach = null;
 
   const opts = buildOptions({
-    workspace: WORKSPACE,
+    workspace,
     systemPrompt: SYSTEM_PROMPT,
     canUseTool: makeCanUseTool(session, decider, (e) => gateEvents.push(e)),
     maxTurns,
@@ -150,4 +157,114 @@ test("L7: off-scope request is declined without tool calls", async () => {
   });
   assert.equal(r.toolUses.length, 0, r.toolUses.map((t) => t.name).join(", "));
   assert.match(r.resultText, /contract|scope|only|outside/i);
+});
+
+// --- L8–L10: drive every remaining curated tool through the enclosure at least
+// once (compare, template vault, contract vault). Each seeds a real fixture so
+// the tool returns genuine data, not a "not configured" stub. ---
+
+const usedTool = (r, short) => r.toolUses.some((t) => t.name === `${PREFIX}${short}`);
+const named = (r) => r.toolUses.map((t) => t.name).join(", ");
+
+test("L8: compare_versions drives the real compare CLI over two versions", async () => {
+  // agreement.md exists in the workspace; write a materially-changed candidate.
+  const candidate = join(WORKSPACE, "agreement-v2.md");
+  writeFileSync(
+    candidate,
+    "MASTER SERVICES AGREEMENT\n\n" +
+      "This Agreement is between Beta LLC and Acme Corp.\n\n" +
+      "1. Term. This agreement runs for twelve (12) months.\n\n" +
+      "2. Fees. The Client shall pay $5,000 per month.\n",
+  );
+  after(() => rmSync(candidate, { force: true }));
+  const r = await runLive({
+    prompt: "Compare agreement.md (the base) against agreement-v2.md (the candidate) and tell me what changed between the two versions.",
+  });
+  assert.deepEqual(onlyContractOps(r.toolUses), []);
+  assert.ok(usedTool(r, "compare_versions"), `compare_versions not called; used: ${named(r)}`);
+  assert.match(r.resultText, /term|fee|\$5,?000|month|chang|drift|differ/i);
+});
+
+test("L9: template vault find/get drive the real template-vault CLI", async () => {
+  // Seed a demo template vault at the workspace root so the CLI (run with
+  // cwd=workspace) discovers it. The demo ships a findable "nda/yc" template.
+  const ws = mkdtempSync(join(tmpdir(), "lh-tvault-"));
+  execFileSync("template-vault", ["demo", "--path", ws, "--clean"], { stdio: "ignore" });
+  after(() => rmSync(ws, { recursive: true, force: true }));
+  const r = await runLive({
+    workspace: ws,
+    prompt: "Search the template vault for an NDA template, then pull up its details.",
+  });
+  assert.deepEqual(onlyContractOps(r.toolUses), []);
+  assert.ok(usedTool(r, "template_vault_find"), `template_vault_find not called; used: ${named(r)}`);
+  assert.match(r.resultText, /nda|template/i);
+});
+
+test("L10: contract vault query + due/risk drive the real contract-vault CLI", async () => {
+  // Seed a contract-vault at the workspace root and ingest one executed deal.
+  const ws = mkdtempSync(join(tmpdir(), "lh-cvault-"));
+  execFileSync("contract-vault", ["init"], { cwd: ws, stdio: "ignore" });
+  writeFileSync(
+    join(ws, "deal.md"),
+    "SERVICES AGREEMENT\n\n" +
+      "This Agreement between Beta LLC and Acme Corp is effective 2025-09-01.\n" +
+      "The initial term is 12 months, expiring 2026-09-01.\n" +
+      "Either party must give notice of non-renewal at least 60 days before expiry.\n",
+  );
+  execFileSync("contract-vault", ["ingest", "deal.md"], { cwd: ws, stdio: "ignore" });
+  after(() => rmSync(ws, { recursive: true, force: true }));
+  const r = await runLive({
+    workspace: ws,
+    prompt: "List the executed contracts in the register, and check whether any renewals or notice deadlines are coming up.",
+  });
+  assert.deepEqual(onlyContractOps(r.toolUses), []);
+  // At least one contract-vault tool must have been driven; the register query
+  // and a deadline projection are both natural for this ask.
+  const cvTools = ["contract_vault_query", "contract_vault_due", "contract_vault_risk"];
+  assert.ok(cvTools.some((t) => usedTool(r, t)), `no contract_vault_* tool called; used: ${named(r)}`);
+  assert.match(r.resultText, /beta llc|services agreement|contract|renewal|notice|deadline|register/i);
+});
+
+test("L11: review_nda drives the real nda-review CLI against a house playbook", async () => {
+  const ws = mkdtempSync(join(tmpdir(), "lh-nda-"));
+  writeFileSync(
+    join(ws, "nda.txt"),
+    "MUTUAL NON-DISCLOSURE AGREEMENT\n" +
+      "1. Confidential Information. Each party protects the other's data.\n" +
+      "2. Non-solicitation. For 24 months, neither party shall solicit the other's employees.\n" +
+      "3. Term. Two years.\n",
+  );
+  writeFileSync(
+    join(ws, "playbook.json"),
+    JSON.stringify({
+      version: "0.1.0", org_name: "Test Org",
+      policy: [{ clause: "non_solicit_non_compete", preferred_position: "avoid hidden non-solicit",
+                 red_flags: ["overbroad non-solicit"], keywords: ["non-solicit", "solicit"] }],
+    }),
+  );
+  after(() => rmSync(ws, { recursive: true, force: true }));
+  const r = await runLive({
+    workspace: ws,
+    prompt: "Review nda.txt against the house playbook playbook.json and give me the decision, risk score, and any findings.",
+  });
+  assert.deepEqual(onlyContractOps(r.toolUses), []);
+  assert.ok(usedTool(r, "review_nda"), `review_nda not called; used: ${named(r)}`);
+  assert.match(r.resultText, /risk|decision|approve|escalate|non[- ]?solicit|finding/i);
+});
+
+test("L12: convert_to_pdf drives the real docx2pdf CLI (gated write)", { skip: skipPdf }, async () => {
+  // sample.docx is a committed fixture; the tool writes sample.pdf into the
+  // workspace and requires approval at the gate.
+  const outPdf = join(WORKSPACE, "sample.pdf");
+  rmSync(outPdf, { force: true });
+  after(() => rmSync(outPdf, { force: true }));
+  const approvals = [];
+  const r = await runLive({
+    prompt: "Convert sample.docx to PDF.",
+    decider: async (tool, _input, detail) => { approvals.push({ tool, detail }); return true; },
+  });
+  assert.deepEqual(onlyContractOps(r.toolUses), []);
+  assert.ok(usedTool(r, "convert_to_pdf"), `convert_to_pdf not called; used: ${named(r)}`);
+  assert.ok(approvals.some((a) => a.tool === `${PREFIX}convert_to_pdf`), "convert_to_pdf should hit the gate");
+  assert.ok(existsSync(outPdf), "sample.pdf should be written into the workspace after approval");
 });
