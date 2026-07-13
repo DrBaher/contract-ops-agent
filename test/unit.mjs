@@ -210,6 +210,7 @@ test("makeAsker serializes questions and honors abort", async () => {
   const asked = [];
   const pending = [];
   const fakeRl = {
+    on() {}, off() {},
     question(q, opts, cb) {
       const callback = typeof opts === "function" ? opts : cb;
       const signal = typeof opts === "object" ? opts.signal : undefined;
@@ -235,4 +236,21 @@ test("makeAsker serializes questions and honors abort", async () => {
   assert.deepEqual(asked, ["gate? ", "next> "]);
   pending[1].callback("hello");
   assert.deepEqual(await nextP, { answer: "hello" });
+});
+
+// Regression: stdin EOF (closed pipe / Ctrl-D) must resolve ask() gracefully,
+// never throw ERR_USE_AFTER_CLOSE. This is the bug the interactive smoke found.
+test("makeAsker resolves to {closed} on readline close instead of throwing", async () => {
+  const listeners = { close: [] };
+  const fakeRl = {
+    on(ev, fn) { (listeners[ev] ||= []).push(fn); },
+    off(ev, fn) { listeners[ev] = (listeners[ev] || []).filter((f) => f !== fn); },
+    question() { /* never answers — we close instead */ },
+  };
+  const ask = makeAsker(fakeRl);
+  const p = ask("prompt> ");
+  listeners.close.forEach((fn) => fn());       // simulate EOF
+  assert.deepEqual(await p, { closed: true });
+  // A question issued AFTER close must also resolve closed, not throw.
+  assert.deepEqual(await ask("again> "), { closed: true });
 });

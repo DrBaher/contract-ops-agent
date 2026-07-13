@@ -42,13 +42,28 @@ export function makeInputQueue() {
 // callback dangling.
 export function makeAsker(rl) {
   let chain = Promise.resolve();
+  let closed = false;
+  rl.on("close", () => { closed = true; });
   const run = (question, signal) => new Promise((resolve) => {
+    if (closed) return resolve({ closed: true });      // stdin ended (EOF / Ctrl-D)
     if (signal?.aborted) return resolve({ aborted: true });
     let done = false;
-    const finish = (v) => { if (!done) { done = true; signal?.removeEventListener("abort", onAbort); resolve(v); } };
+    const finish = (v) => {
+      if (done) return;
+      done = true;
+      signal?.removeEventListener("abort", onAbort);
+      rl.off("close", onClose);
+      resolve(v);
+    };
     const onAbort = () => finish({ aborted: true });
+    const onClose = () => finish({ closed: true });    // readline closed mid-question
     signal?.addEventListener("abort", onAbort, { once: true });
-    rl.question(question, signal ? { signal } : {}, (answer) => finish({ answer }));
+    rl.on("close", onClose);
+    try {
+      rl.question(question, signal ? { signal } : {}, (answer) => finish({ answer }));
+    } catch {
+      finish({ closed: true });                        // question after close → treat as EOF
+    }
   });
   return (question, signal) => {
     const result = chain.then(() => run(question, signal));
@@ -69,16 +84,17 @@ export async function startRepl({ options, transcript, input = process.stdin, ou
     const ctl = new AbortController();
     activeGateAbort = ctl;
     try {
-      const { answer, aborted } = await ask(`\n⚖ gate: ${detail}\n  approve? [y/N] `, ctl.signal);
-      if (aborted) return false;
+      const { answer, aborted, closed } = await ask(`\n⚖ gate: ${detail}\n  approve? [y/N] `, ctl.signal);
+      if (aborted || closed) return false;             // interrupted or EOF → decline, don't hang
       return /^y(es)?$/i.test(String(answer).trim());
     } finally {
       if (activeGateAbort === ctl) activeGateAbort = null;
     }
   };
 
-  const first = (await ask("legal-harness> ")).answer?.trim();
-  if (!first || first === "/quit") { rl.close(); return; }
+  const r0 = await ask("legal-harness> ");
+  const first = r0.closed ? null : r0.answer?.trim();
+  if (!first || first === "/quit") { if (!r0.closed) rl.close(); return; }
   queue.push(sdkUserMessage(first));
   transcript.write({ type: "user", text: first });
 
@@ -125,11 +141,12 @@ export async function startRepl({ options, transcript, input = process.stdin, ou
     if (message.type === "result") {
       interrupted = false;
       transcript.write({ type: "result", subtype: message.subtype, turns: message.num_turns, cost: message.total_cost_usd });
-      const next = (await ask("\nlegal-harness> ")).answer?.trim();
-      if (!next || next === "/quit") { queue.close(); break; }
+      const r = await ask("\nlegal-harness> ");
+      const next = r.closed ? null : r.answer?.trim();
+      if (!next || next === "/quit") { queue.close(); break; }   // EOF, blank, or /quit → exit
       transcript.write({ type: "user", text: next });
       queue.push(sdkUserMessage(next));
     }
   }
-  rl.close();
+  if (!rl.closed) rl.close();
 }
