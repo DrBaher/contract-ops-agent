@@ -13,20 +13,27 @@ Scope and rationale: `contract-ops-mcp/docs/legal-harness-scope.md` (Tier 3).
 
 ```bash
 npm install
-node bin/legal-harness.mjs --workspace ./my-contracts
+node bin/legal-harness.mjs          # first run: a one-time setup wizard, then the REPL
 ```
 
-On start it prints a preflight (which suite CLIs are installed) and opens a REPL.
-Type contract requests; `/quit` to exit. Ctrl-C interrupts the current turn,
-twice to exit.
+The **first run** walks a short wizard — it checks which contract-ops CLIs are
+installed (and offers to install any that are missing), picks your workspace
+directory, and sets up auth — then drops you into the agent. Every later run
+goes straight to the REPL. Config is saved under
+`~/.config/legal-harness/` (any secret lives in a separate `0600` file, never in
+`config.json` or a transcript).
 
 ```
---workspace <dir>   directory the tools may touch (default: cwd)
---model <model>     model override (default: the SDK default)
+legal-harness [--workspace <dir>] [--model <model>]   start the agent
+legal-harness setup                                   (re)run the setup wizard
+legal-harness doctor                                  check environment; offer to install what's missing
 ```
+
+In the REPL, type contract requests; `/quit` to exit; Ctrl-C interrupts the
+current turn, twice to exit.
 
 The contract-ops CLIs must be installed (the MCP server shells out to them);
-preflight tells you which are missing and how to install each.
+`doctor` and the first-run wizard tell you which are missing and can install them.
 
 ## Auth — bring your own
 

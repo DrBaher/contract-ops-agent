@@ -1,12 +1,12 @@
 {
   "name": "legal-harness",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "private": true,
   "description": "Contract work in an enclosure: a Claude Agent SDK agent whose only tools are the contract-ops suite — no shell, no filesystem, no signing.",
   "type": "module",
   "scripts": {
     "spike": "node spike.mjs",
-    "test": "node --test test/unit.mjs",
+    "test": "node --test test/unit.mjs test/onboarding.mjs",
     "test:live": "node --test --test-concurrency=1 test/live.mjs"
   },
   "engines": {

@@ -4,7 +4,7 @@ import { CLIS } from "contract-ops-mcp/contract-ops-mcp.mjs";
 
 const pexec = promisify(execFile);
 
-async function defaultCheckBin(bin) {
+export async function defaultCheckBin(bin) {
   const locator = process.platform === "win32" ? "where" : "which";
   try {
     await pexec(locator, [bin]);
