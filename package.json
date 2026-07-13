@@ -1,7 +1,6 @@
 {
   "name": "legal-harness",
   "version": "0.2.0",
-  "private": true,
   "description": "Contract work in an enclosure: a Claude Agent SDK agent whose only tools are the contract-ops suite — no shell, no filesystem, no signing.",
   "type": "module",
   "scripts": {
