@@ -31,7 +31,7 @@ function renderArgv(args) {
 
 export function decide(toolName, input = {}, session = newSessionState()) {
   if (typeof toolName !== "string" || !toolName.startsWith(PREFIX)) {
-    return { kind: "deny", detail: `"${toolName}" is outside the legal-harness enclosure — only contract-ops tools exist here` };
+    return { kind: "deny", detail: `"${toolName}" is outside the contract-ops-agent enclosure — only contract-ops tools exist here` };
   }
   const short = toolName.slice(PREFIX.length);
 
@@ -83,7 +83,7 @@ export function makeCanUseTool(session, prompter, onEvent = () => {}) {
         if (d.key) session.approvals.add(d.key);
         outcome = { behavior: "allow", updatedInput: input };
       } else {
-        outcome = { behavior: "deny", message: "The user declined this action at the legal-harness gate. Do not retry it; ask what they'd like instead." };
+        outcome = { behavior: "deny", message: "The user declined this action at the contract-ops-agent gate. Do not retry it; ask what they'd like instead." };
       }
     }
     onEvent({ type: "gate", tool: toolName, input, decision: d.kind, behavior: outcome.behavior, detail: d.detail });

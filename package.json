@@ -1,5 +1,5 @@
 {
-  "name": "legal-harness",
+  "name": "contract-ops-agent",
   "version": "0.2.0",
   "description": "Contract work in an enclosure: a Claude Agent SDK agent whose only tools are the contract-ops suite — no shell, no filesystem, no signing.",
   "type": "module",
@@ -16,7 +16,7 @@
     "contract-ops-mcp": "^0.1.7"
   },
   "bin": {
-    "legal-harness": "./bin/legal-harness.mjs"
+    "contract-ops-agent": "./bin/contract-ops-agent.mjs"
   },
   "files": [
     "bin/",
@@ -26,6 +26,6 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/DrBaher/legal-harness.git"
+    "url": "git+https://github.com/DrBaher/contract-ops-agent.git"
   }
 }

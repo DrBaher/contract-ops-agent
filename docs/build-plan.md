@@ -1,13 +1,13 @@
-# legal-harness — Build Plan (M1 + M2)
+# contract-ops-agent — Build Plan (M1 + M2)
 
 **Status:** Approved for execution · 2026-07-13
-**Input:** `contract-ops-mcp/docs/legal-harness-scope.md` (Tier 3 scope) + passing M0 spike (`spike.mjs`).
-**Deliverable:** `legal-harness` v0.1.0 — an interactive terminal agent (`node bin/legal-harness.mjs`, npx-ready) whose only tools are the contract-ops MCP tools, with human confirmation gates and a local audit transcript.
+**Input:** `contract-ops-mcp/docs/contract-ops-agent-scope.md` (Tier 3 scope) + passing M0 spike (`spike.mjs`).
+**Deliverable:** `contract-ops-agent` v0.1.0 — an interactive terminal agent (`node bin/contract-ops-agent.mjs`, npx-ready) whose only tools are the contract-ops MCP tools, with human confirmation gates and a local audit transcript.
 
 ## 1. Architecture
 
 ```
-bin/legal-harness.mjs      thin entry: parse flags, preflight, start REPL
+bin/contract-ops-agent.mjs      thin entry: parse flags, preflight, start REPL
 src/options.mjs            enclosure config builder (pure) — disallow list,
                            strictMcpConfig, settingSources: [], model passthrough
 src/gates.mjs              canUseTool policy (pure decision core + pluggable
@@ -25,7 +25,7 @@ src/repl.mjs               readline UI: streaming-input query session, renders
 
 Key decisions:
 
-- **MCP server via package dependency, not hardcoded path.** Depend on `contract-ops-mcp` (npm) and mount `node <resolved path>`; the module exports `CLIS` without starting the server, which `preflight.mjs` reuses. Local override via `LEGAL_HARNESS_MCP_PATH` for development.
+- **MCP server via package dependency, not hardcoded path.** Depend on `contract-ops-mcp` (npm) and mount `node <resolved path>`; the module exports `CLIS` without starting the server, which `preflight.mjs` reuses. Local override via `CONTRACT_OPS_AGENT_MCP_PATH` for development.
 - **`permissionMode: "default"`, not `"dontAsk"`.** `canUseTool` does not fire under `dontAsk` (verified in M0 research), and M1's confirmation gates live in `canUseTool`. Deny-by-default for non-contract-ops tools therefore moves into the gate policy.
 - **Enclosure = three independent layers.** (1) explicit `disallowedTools` list strips built-ins/harness tools from context; (2) `canUseTool` denies any tool not matching `mcp__contract-ops__*`; (3) startup assertion aborts if the init tool list contains anything else. `strictMcpConfig: true` + `settingSources: []` keep out inherited MCP servers (incl. claude.ai connectors) and CLAUDE.md leakage. Layer 3 is the guarantee; 1–2 are how we satisfy it.
 - **Workspace confinement** stays the MCP server's job (`CONTRACT_OPS_MCP_BASE_DIR` = `--workspace` flag, default cwd). The harness never re-implements path checks.
@@ -39,7 +39,7 @@ Key decisions:
 | Consequential | fill_template (emits the filled draft on stdout — no file write), convert_to_pdf (writes a .pdf) | Confirm; approval remembered per session — keyed per template (fill) / per output directory (convert) |
 | Escape hatch | run | Always confirm, showing exact CLI + argv (no session memory) |
 | Unknown contract-ops tool | future server additions | Confirm (never silently allow) |
-| Everything else | any name not starting `mcp__contract-ops__` | Deny with message "outside the legal-harness enclosure" |
+| Everything else | any name not starting `mcp__contract-ops__` | Deny with message "outside the contract-ops-agent enclosure" |
 
 **No `allowedTools` in the options.** `allowedTools` auto-approves *before* `canUseTool` fires, which would bypass the gates — every tool call must route through the callback. (U5 asserts its absence.)
 
@@ -82,7 +82,7 @@ Pass bar: all U green; all L green with **zero** non-`mcp__contract-ops__*` tool
 | P2 Unit tests | inline + loop-until-green | write U1–U8, run `node --test`, fix until green |
 | P3 Live tests | inline + loop-until-green (bounded: 3 rounds) | write live runner with scripted deciders + programmatic assertions; run L1–L7 |
 | P4 Adversarial review | **Workflow**: parallel finders (enclosure-escape hunt, gate-logic correctness, SDK API misuse, packaging/UX) → adversarial verify per finding → I fix confirmed findings, rerun affected tests | |
-| P5 Package & verify | inline | bin entry + npx smoke (`node bin/legal-harness.mjs --help`, preflight output), README, final full test pass, tag v0.1.0 (no publish without explicit ask) |
+| P5 Package & verify | inline | bin entry + npx smoke (`node bin/contract-ops-agent.mjs --help`, preflight output), README, final full test pass, tag v0.1.0 (no publish without explicit ask) |
 
 Out of scope (unchanged from scope doc): sign-cli MCP mounting (v1.1), npm publish, API-key documentation polish beyond README's bring-your-own-auth section.
 
@@ -101,7 +101,7 @@ All phases complete. v0.1.0 built and verified; not published.
 
 ## 5. Acceptance criteria (v0.1.0)
 
-1. `node bin/legal-harness.mjs` in a contracts directory: preflight prints suite status, REPL starts, extract→lint conversation works with visible tool-activity lines.
+1. `node bin/contract-ops-agent.mjs` in a contracts directory: preflight prints suite status, REPL starts, extract→lint conversation works with visible tool-activity lines.
 2. No sequence of agent actions can execute a shell command, write outside the workspace, reach the web, or sign — enforced by layers 1–3 and demonstrated by L1/L2/L6.
 3. Every artifact change is attributable in the transcript to a specific tool call with its input and gate decision.
 4. Full unit suite green offline; full live suite green; zero unexplained non-contract-ops tool events in any transcript.

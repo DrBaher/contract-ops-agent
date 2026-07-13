@@ -1,4 +1,4 @@
-# legal-harness
+# contract-ops-agent
 
 A terminal agent for contract work, in an **enclosure**: the agent's only tools
 are the [contract-ops](https://cli.drbaher.com/) suite, exposed through
@@ -7,26 +7,26 @@ policy but by construction. If a request can't be served by extract, lint,
 compare, fill, convert, review, the vaults, or verify, the agent literally has
 no way to do it.
 
-Scope and rationale: `contract-ops-mcp/docs/legal-harness-scope.md` (Tier 3).
+Scope and rationale: `docs/contract-ops-agent-scope.md` (Tier 3).
 
 ## Install & run
 
 ```bash
 npm install
-node bin/legal-harness.mjs          # first run: a one-time setup wizard, then the REPL
+node bin/contract-ops-agent.mjs          # first run: a one-time setup wizard, then the REPL
 ```
 
 The **first run** walks a short wizard — it checks which contract-ops CLIs are
 installed (and offers to install any that are missing), picks your workspace
 directory, and sets up auth — then drops you into the agent. Every later run
 goes straight to the REPL. Config is saved under
-`~/.config/legal-harness/` (any secret lives in a separate `0600` file, never in
+`~/.config/contract-ops-agent/` (any secret lives in a separate `0600` file, never in
 `config.json` or a transcript).
 
 ```
-legal-harness [--workspace <dir>] [--model <model>]   start the agent
-legal-harness setup                                   (re)run the setup wizard
-legal-harness doctor                                  check environment; offer to install what's missing
+contract-ops-agent [--workspace <dir>] [--model <model>]   start the agent
+contract-ops-agent setup                                   (re)run the setup wizard
+contract-ops-agent doctor                                  check environment; offer to install what's missing
 ```
 
 In the REPL, type contract requests; `/quit` to exit; Ctrl-C interrupts the

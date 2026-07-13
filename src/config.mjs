@@ -8,7 +8,7 @@ export const CONFIG_VERSION = 1;
 // at a temp dir. Secrets live in a separate 0600 file, never in config.json.
 export function configDir(env = process.env) {
   const base = env.XDG_CONFIG_HOME || join(env.HOME || homedir(), ".config");
-  return join(base, "legal-harness");
+  return join(base, "contract-ops-agent");
 }
 export function configPath(env = process.env) { return join(configDir(env), "config.json"); }
 export function credentialsPath(env = process.env) { return join(configDir(env), "credentials.json"); }

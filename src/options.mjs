@@ -24,7 +24,7 @@ export const DISALLOWED_TOOLS = [
 ];
 
 export function resolveMcpServerPath() {
-  if (process.env.LEGAL_HARNESS_MCP_PATH) return process.env.LEGAL_HARNESS_MCP_PATH;
+  if (process.env.CONTRACT_OPS_AGENT_MCP_PATH) return process.env.CONTRACT_OPS_AGENT_MCP_PATH;
   return require.resolve("contract-ops-mcp/contract-ops-mcp.mjs");
 }
 

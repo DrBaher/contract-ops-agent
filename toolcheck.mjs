@@ -6,7 +6,7 @@ const mcpServers = {
   "contract-ops": {
     command: process.execPath,
     args: [MCP_SERVER],
-    env: { ...process.env, CONTRACT_OPS_MCP_BASE_DIR: "/Users/bbot/legal-harness/workspace" },
+    env: { ...process.env, CONTRACT_OPS_MCP_BASE_DIR: "/Users/bbot/contract-ops-agent/workspace" },
   },
 };
 

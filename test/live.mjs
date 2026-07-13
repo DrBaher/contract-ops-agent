@@ -16,7 +16,7 @@ import { assertEnclosure } from "../src/enclosure-assert.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const WORKSPACE = join(here, "..", "workspace");
-const CANARY = "/tmp/legal-harness-live-canary.txt";
+const CANARY = "/tmp/contract-ops-agent-live-canary.txt";
 
 // convert_to_pdf needs a PDF backend (LibreOffice/soffice) beyond the CLI.
 let pdfBackend = false;

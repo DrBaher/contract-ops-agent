@@ -2,15 +2,15 @@ name: Publish to npm
 # OIDC Trusted Publishing — NO long-lived token.
 #
 # One-time setup on npmjs.com before the first tag-triggered publish will work:
-#   1. The `legal-harness` package must exist on npm. It doesn't yet, and npm
+#   1. The `contract-ops-agent` package must exist on npm. It doesn't yet, and npm
 #      Trusted Publishing is configured per-package, so bootstrap it once:
 #        - either do a single manual `npm publish` (npm login → npm publish
 #          --access public) to create the package, THEN configure the trusted
 #          publisher, or
 #        - configure the trusted publisher on your npm account first if your
 #          npm plan supports pre-registering it for a new package name.
-#   2. Package `legal-harness` → Settings → Trusted Publisher → GitHub Actions
-#        organization/user = DrBaher · repository = legal-harness
+#   2. Package `contract-ops-agent` → Settings → Trusted Publisher → GitHub Actions
+#        organization/user = DrBaher · repository = contract-ops-agent
 #        workflow filename = publish.yml · environment = (leave blank)
 #
 # IMPORTANT: do NOT add `registry-url:` to actions/setup-node. With it, setup-node

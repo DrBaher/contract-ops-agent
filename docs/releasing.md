@@ -16,18 +16,18 @@ runs the tests, verifies the tag matches `package.json`'s version, then
 
 ### One-time setup (required before the first publish)
 
-npm Trusted Publishing is configured per package, and `legal-harness` does not
+npm Trusted Publishing is configured per package, and `contract-ops-agent` does not
 exist on npm yet, so bootstrap it once:
 
 1. **Create the package on npm.** Either:
    - `npm login` then `npm publish --access public` once from a clean checkout
-     (creates `legal-harness@<current version>`), **or**
+     (creates `contract-ops-agent@<current version>`), **or**
    - pre-register the trusted publisher on your npm account if your plan allows
      it for a not-yet-published name.
-2. **Configure the trusted publisher:** npmjs.com → package `legal-harness` →
+2. **Configure the trusted publisher:** npmjs.com → package `contract-ops-agent` →
    Settings → Trusted Publisher → GitHub Actions:
    - organization/user = `DrBaher`
-   - repository = `legal-harness`
+   - repository = `contract-ops-agent`
    - workflow filename = `publish.yml`
    - environment = (leave blank)
 
@@ -48,7 +48,7 @@ sync). A published release also carries npm provenance from the OIDC build.
 
 ### Dependency note
 
-`legal-harness` depends on `contract-ops-mcp` (the MCP server it mounts). Keep
+`contract-ops-agent` depends on `contract-ops-mcp` (the MCP server it mounts). Keep
 that dependency at a version that includes the fixes the harness relies on —
 currently `^0.1.7` (the `fill_template` fix). Bump it when the server releases
 functionality the harness needs.

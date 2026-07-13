@@ -1,4 +1,4 @@
-# Legal Harness — Tier 3 Scope
+# contract-ops-agent — Tier 3 Scope
 
 **Status:** Draft v1 · 2026-07-13
 **Decision:** Build the Tier 3 *enclosure*: a standalone agent built on the Claude Agent SDK whose only tools are the contract-ops MCP tools. The agent physically cannot act outside the suite — no Bash, no file editing, no freelance analysis paths.
@@ -11,7 +11,7 @@ Steering (CLAUDE.md routing) and gating (hooks/permissions) reduce this but cann
 
 ## 2. Product definition
 
-A terminal agent — working name **`legal-harness`** — that a contract-ops user runs instead of a general coding agent when doing contract work.
+A terminal agent — working name **`contract-ops-agent`** — that a contract-ops user runs instead of a general coding agent when doing contract work.
 
 - Interactive chat loop in the terminal (ask → agent works → answer), with streamed progress.
 - The agent's *entire* tool surface is `contract-ops-mcp` (§4). No shell, no file read/write tools, no web.
@@ -28,7 +28,7 @@ A terminal agent — working name **`legal-harness`** — that a contract-ops us
 
 ## 3. Architecture
 
-- **Runtime:** Claude Agent SDK (TypeScript — matches the existing Node/`.mjs` codebase and reuses the MCP server unchanged). Distributed like the MCP server: `npx legal-harness` / one `bin` entry.
+- **Runtime:** Claude Agent SDK (TypeScript — matches the existing Node/`.mjs` codebase and reuses the MCP server unchanged). Distributed like the MCP server: `npx contract-ops-agent` / one `bin` entry.
 - **Tool mounting:** the SDK session mounts `contract-ops-mcp` as an MCP server (stdio). All built-in tools (Bash, Edit, Write, WebSearch, …) are disabled via the SDK's allowed-tools configuration. The enclosure is enforced by configuration, not prompting.
 - **Model:** default to the strongest available model; configurable.
 - **Sandbox:** inherits the MCP server's existing guarantees — `CONTRACT_OPS_MCP_BASE_DIR` path confinement, `execFile` (no shell), sign-subcommand allowlist on the `run`/`catalog` escape hatches.
@@ -69,17 +69,17 @@ Sources: Agent SDK quickstart & overview (code.claude.com/docs), help-center art
 |---|---|---|---|
 | M0 | Enclosure spike | SDK session + MCP mount, built-ins disabled; prove the agent cannot touch the filesystem or shell; drive one extract→lint flow | 1–2 days |
 
-**M0 result (2026-07-13): passed.** Spike lives in `~/legal-harness` (`spike.mjs`). Findings that bind M1:
+**M0 result (2026-07-13): passed.** Spike lives in `~/contract-ops-agent` (`spike.mjs`). Findings that bind M1:
 
 - `disallowedTools: ["*"]` strips MCP tools too (session ends up with zero tools) — the working enclosure is an *explicit* disallow list of built-ins/harness tools + `allowedTools: ["mcp__contract-ops__*"]` + `permissionMode: "dontAsk"`.
 - The disallow list is version-brittle, so the harness must **assert at startup** (on the SDK `init` message) that every mounted tool matches `mcp__contract-ops__*` and refuse to start otherwise. This assertion is the real guarantee; the disallow list is just how we satisfy it.
 - `strictMcpConfig: true` + the startup assertion also keep out claude.ai MCP connectors (Gmail/Drive/Calendar), which otherwise mount from the operator's logged-in environment.
 - Enclosure probe: asked to run shell commands, write files, and read `/etc/hosts`, the agent invoked zero non-MCP tools and correctly explained it has no such capabilities. Extract→lint on a defective fixture used the real CLIs and reported both seeded defects (placeholder, broken xref).
 | M1 | Core harness | System prompt (AGENTS.md loop), confirmation gates, streamed terminal UX, session transcript saved locally | 3–5 days |
-| M2 | Packaging | `npx legal-harness`, `suite_status` preflight with install hints, README (auth framing per §5), smoke tests | 2–3 days |
+| M2 | Packaging | `npx contract-ops-agent`, `suite_status` preflight with install hints, README (auth framing per §5), smoke tests | 2–3 days |
 | M3 | v1.1 signing door | sign-cli MCP mount behind a flag | separate scope |
 
-**M1 + M2 result (2026-07-13): built and verified as `legal-harness` v0.1.0** (sibling repo `~/legal-harness`; open question §10 resolved in favor of a separate repo). Interactive REPL with streaming-input multi-turn, `canUseTool` gates (read-only auto-allow; fill/convert/run confirm; sign denied; everything else denied), JSONL transcript, npx-ready bin. 18 unit + 7 live tests green. Built per `~/legal-harness/docs/build-plan.md`, which records the full test matrix and the adversarial-review outcome (11 findings fixed).
+**M1 + M2 result (2026-07-13): built and verified as `contract-ops-agent` v0.1.0** (sibling repo `~/contract-ops-agent`; open question §10 resolved in favor of a separate repo). Interactive REPL with streaming-input multi-turn, `canUseTool` gates (read-only auto-allow; fill/convert/run confirm; sign denied; everything else denied), JSONL transcript, npx-ready bin. 18 unit + 7 live tests green. Built per `~/contract-ops-agent/docs/build-plan.md`, which records the full test matrix and the adversarial-review outcome (11 findings fixed).
 
 **Cross-repo finding for THIS repo — fixed (staged, not committed) 2026-07-13:** an adversarial review of the harness surfaced a real defect in *this* server — `assertSignReadOnly` gated sign *subcommands* but never inspected *flags*, so a state-mutating flag on an otherwise read-only sign subcommand would pass the guard. Fixed by adding a `SIGN_MUTATING_FLAGS` denylist scanned across the whole argv (`--apply`, `--sign`, `--send`, `--approve`, `--token`, `--anchor`, `--force`, `--yes`, key rotation, etc.), so a mutating flag on any sign invocation — allowlisted subcommand or not — is refused. Four unit tests added (`test/unit.mjs`, all 13 green). The harness was already unaffected (it denies `run`+`sign` entirely client-side); this hardens the server's own guarantee.
 
@@ -99,10 +99,10 @@ Sources: Agent SDK quickstart & overview (code.claude.com/docs), help-center art
 1. From inside the harness there is no sequence of agent actions that modifies a file except via a curated tool, and none that signs anything.
 2. Every artifact change is attributable to a specific CLI invocation (argv + exit code) in the session transcript.
 3. The AGENTS.md loop happens by default on a realistic task (foreign NDA → extract → review → lint → handoff) with no operator steering.
-4. A new user goes from `npx legal-harness` to a completed extract on their own machine in under five minutes.
+4. A new user goes from `npx contract-ops-agent` to a completed extract on their own machine in under five minutes.
 
 ## 10. Open questions
 
-- **Repo:** new sibling repo (`legal-harness`) vs a workspace inside this one. Leaning new repo — different release cadence, this repo stays a pure MCP server.
-- **Name:** `legal-harness` vs `contract-ops-agent` vs something brandable under cli.drbaher.com.
+- **Repo:** new sibling repo (`contract-ops-agent`) vs a workspace inside this one. Leaning new repo — different release cadence, this repo stays a pure MCP server.
+- **Name:** `contract-ops-agent` vs `contract-ops-agent` vs something brandable under cli.drbaher.com.
 - **Transcript format:** plain markdown log vs structured JSONL (feeds a future audit story).

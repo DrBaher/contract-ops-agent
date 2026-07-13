@@ -42,7 +42,7 @@ export function renderDoctor(diag) {
   const a = diag.auth;
   const authState = a.configured
     ? `configured (${a.configured})`
-    : a.apiKeyInEnv ? "ANTHROPIC_API_KEY in env" : a.claudeCodeToken ? "Claude Code login" : "NOT configured — run `legal-harness setup`";
+    : a.apiKeyInEnv ? "ANTHROPIC_API_KEY in env" : a.claudeCodeToken ? "Claude Code login" : "NOT configured — run `contract-ops-agent setup`";
   lines.push(`Auth:        ${authState}`);
   return lines.join("\n");
 }

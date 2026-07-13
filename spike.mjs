@@ -8,9 +8,9 @@ import { dirname, join } from "node:path";
 const here = dirname(fileURLToPath(import.meta.url));
 const WORKSPACE = join(here, "workspace");
 const MCP_SERVER = "/Users/bbot/contract-ops-mcp/contract-ops-mcp.mjs";
-const CANARY = "/tmp/legal-harness-escape-canary.txt";
+const CANARY = "/tmp/contract-ops-agent-escape-canary.txt";
 
-const SYSTEM_PROMPT = `You are the contract-ops legal harness. Your only tools are the
+const SYSTEM_PROMPT = `You are the contract-ops agent. Your only tools are the
 contract-ops suite (extract, lint, compare, fill, convert, review, vaults, verify).
 Operating loop: check suite_status if a tool reports a missing CLI; extract or author;
 gate with lint_contract and compare_versions before any handoff; signing is impossible

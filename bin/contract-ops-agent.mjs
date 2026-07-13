@@ -20,13 +20,13 @@ function flag(name) {
 }
 
 if (argv.includes("--help") || argv.includes("-h")) {
-  console.log(`legal-harness — contract work in an enclosure: the agent's only tools are the
+  console.log(`contract-ops-agent — contract work in an enclosure: the agent's only tools are the
 contract-ops suite. No shell, no file access, no web, no signing.
 
 Usage:
-  legal-harness [--workspace <dir>] [--model <model>]   start the agent (first run: setup wizard)
-  legal-harness setup                                   (re)run the setup wizard
-  legal-harness doctor                                  check environment; offer to install what's missing
+  contract-ops-agent [--workspace <dir>] [--model <model>]   start the agent (first run: setup wizard)
+  contract-ops-agent setup                                   (re)run the setup wizard
+  contract-ops-agent doctor                                  check environment; offer to install what's missing
 
 Auth: bring your own — an Anthropic API key, or your existing Claude Code login.`);
   process.exit(0);
@@ -57,7 +57,7 @@ if (sub === "doctor") {
 
 if (sub === "setup") {
   await withAsker((ask) => runSetup({ ask, checkBin: undefined, runInstall, out: (m) => console.log(m) }));
-  console.log(`\nDone. Run \`legal-harness\` to start.`);
+  console.log(`\nDone. Run \`contract-ops-agent\` to start.`);
   process.exit(0);
 }
 

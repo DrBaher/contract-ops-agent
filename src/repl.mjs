@@ -92,7 +92,7 @@ export async function startRepl({ options, transcript, input = process.stdin, ou
     }
   };
 
-  const r0 = await ask("legal-harness> ");
+  const r0 = await ask("contract-ops-agent> ");
   const first = r0.closed ? null : r0.answer?.trim();
   if (!first || first === "/quit") { if (!r0.closed) rl.close(); return; }
   queue.push(sdkUserMessage(first));
@@ -141,7 +141,7 @@ export async function startRepl({ options, transcript, input = process.stdin, ou
     if (message.type === "result") {
       interrupted = false;
       transcript.write({ type: "result", subtype: message.subtype, turns: message.num_turns, cost: message.total_cost_usd });
-      const r = await ask("\nlegal-harness> ");
+      const r = await ask("\ncontract-ops-agent> ");
       const next = r.closed ? null : r.answer?.trim();
       if (!next || next === "/quit") { queue.close(); break; }   // EOF, blank, or /quit → exit
       transcript.write({ type: "user", text: next });

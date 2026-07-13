@@ -26,7 +26,7 @@ export class Transcript {
       appendFileSync(this.path, JSON.stringify({ ts: new Date().toISOString(), ...event }) + "\n");
     } catch (err) {
       this._disabled = true;
-      this._warn(`[legal-harness] transcript disabled — cannot write ${this.path}: ${err.message}`);
+      this._warn(`[contract-ops-agent] transcript disabled — cannot write ${this.path}: ${err.message}`);
     }
   }
 }
