@@ -1,0 +1,32 @@
+{
+  "name": "legal-harness",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Contract work in an enclosure: a Claude Agent SDK agent whose only tools are the contract-ops suite — no shell, no filesystem, no signing.",
+  "type": "module",
+  "scripts": {
+    "spike": "node spike.mjs",
+    "test": "node --test test/unit.mjs",
+    "test:live": "node --test --test-concurrency=1 test/live.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.207",
+    "contract-ops-mcp": "^0.1.6"
+  },
+  "bin": {
+    "legal-harness": "./bin/legal-harness.mjs"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "README.md"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DrBaher/legal-harness.git"
+  }
+}
