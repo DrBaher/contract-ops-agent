@@ -57,7 +57,10 @@ if (sub === "doctor") {
 
 if (sub === "setup") {
   await withAsker((ask) => runSetup({ ask, checkBin: undefined, runInstall, out: (m) => console.log(m) }));
-  console.log(`\nDone. Run \`contract-ops-agent\` to start.`);
+  console.log(`\nSetup complete. Start the agent with:  contract-ops-agent`);
+  console.log(`  (if that's "command not found", you're running from source — use`);
+  console.log(`   node bin/contract-ops-agent.mjs, or run \`npm link\` in this repo once`);
+  console.log(`   to install the command globally.)`);
   process.exit(0);
 }
 
