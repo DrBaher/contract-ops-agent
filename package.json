@@ -6,14 +6,16 @@
   "scripts": {
     "spike": "node spike.mjs",
     "test": "node --test test/unit.mjs test/onboarding.mjs",
-    "test:live": "node --test --test-concurrency=1 test/live.mjs"
+    "test:live": "node --test --test-concurrency=1 test/live.mjs",
+    "test:loop": "node --test test/loop.mjs"
   },
   "engines": {
     "node": ">=18"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.207",
-    "contract-ops-mcp": "^0.1.7"
+    "contract-ops-mcp": "^0.1.7",
+    "openai": "^6.46.0"
   },
   "bin": {
     "contract-ops-agent": "./bin/contract-ops-agent.mjs"

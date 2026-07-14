@@ -1,11 +1,13 @@
 import { claudeProvider } from "./claude.mjs";
+import { openaiProvider } from "./openai.mjs";
 
 // Provider registry. A `provider/model` ref (OpenClaw-style) selects a backend;
-// each provider owns its own runtime (Claude via the Agent SDK; others, later,
-// via the raw MCP-client loop) behind the same normalized Session interface.
+// each provider owns its own runtime (Claude via the Agent SDK to preserve
+// subscription auth; others via the raw MCP-client loop) behind the same
+// normalized Session interface.
 const PROVIDERS = {
   claude: claudeProvider,
-  // openai: openaiProvider,   // M2
+  openai: openaiProvider,
 };
 
 // Accept a bare id ("claude") or a "provider/model" ref ("claude/claude-opus-4-8").

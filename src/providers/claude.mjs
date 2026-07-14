@@ -10,6 +10,7 @@
 // the startup assertion (in the REPL) refuses to run on a dirty tool list.
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { resolveMcpServerPath, mcpServerEnv } from "../mcp-client.mjs";
+import { makeInputQueue } from "../async-queue.mjs";
 
 export const DISALLOWED_TOOLS = [
   "Bash", "Read", "Write", "Edit", "Glob", "Grep", "WebSearch", "WebFetch",
@@ -52,25 +53,6 @@ function sdkUserMessage(text) {
     type: "user",
     message: { role: "user", content: [{ type: "text", text }] },
     parent_tool_use_id: null,
-  };
-}
-
-// Minimal async queue feeding the SDK's streaming-input prompt iterable one user
-// turn at a time.
-export function makeInputQueue() {
-  const items = [];
-  let wake = null;
-  let closed = false;
-  return {
-    push(v) { items.push(v); if (wake) { const w = wake; wake = null; w(); } },
-    close() { closed = true; if (wake) { const w = wake; wake = null; w(); } },
-    async *[Symbol.asyncIterator]() {
-      for (;;) {
-        while (items.length) yield items.shift();
-        if (closed) return;
-        await new Promise((res) => { wake = res; });
-      }
-    },
   };
 }
 

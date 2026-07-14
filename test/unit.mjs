@@ -5,8 +5,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { decide, makeCanUseTool, newSessionState, READ_ONLY, PREFIX } from "../src/gates.mjs";
-import { buildOptions, DISALLOWED_TOOLS, makeInputQueue } from "../src/providers/claude.mjs";
+import { buildOptions, DISALLOWED_TOOLS } from "../src/providers/claude.mjs";
 import { mcpServerEnv } from "../src/mcp-client.mjs";
+import { makeInputQueue } from "../src/async-queue.mjs";
+import { makeOpenAIDriver } from "../src/providers/openai.mjs";
+import { resolveProvider, modelFromRef } from "../src/providers/index.mjs";
 import { assertEnclosure } from "../src/enclosure-assert.mjs";
 import { Transcript } from "../src/transcript.mjs";
 import { preflight, renderPreflight } from "../src/preflight.mjs";
@@ -254,4 +257,62 @@ test("makeAsker resolves to {closed} on readline close instead of throwing", asy
   assert.deepEqual(await p, { closed: true });
   // A question issued AFTER close must also resolve closed, not throw.
   assert.deepEqual(await ask("again> "), { closed: true });
+});
+
+// --- v0.3 provider abstraction (offline) ---
+
+test("P1: provider registry resolves ids and provider/model refs", () => {
+  assert.equal(resolveProvider("claude").id, "claude");
+  assert.equal(resolveProvider("openai").id, "openai");
+  assert.equal(resolveProvider("openai/gpt-4o").id, "openai");
+  assert.equal(resolveProvider(undefined).id, "claude");            // default
+  assert.equal(modelFromRef("openai/gpt-4o"), "gpt-4o");
+  assert.equal(modelFromRef("openai/gpt-4o-mini-2026"), "gpt-4o-mini-2026");
+  assert.equal(modelFromRef("claude"), undefined);
+  assert.throws(() => resolveProvider("gemini"), /unknown model provider/);
+});
+
+test("O1: OpenAI driver maps MCP tools → function tools and normalizes tool calls", async () => {
+  // Stub client: echoes back a tool call, so we test the dialect mapping only.
+  const seen = {};
+  const client = {
+    chat: { completions: { create: async (req) => { seen.req = req; return {
+      choices: [{ message: { content: "hi", tool_calls: [
+        { id: "t1", type: "function", function: { name: "mcp__contract-ops__lint_contract", arguments: '{"path":"a.md"}' } },
+      ] } }],
+    }; } } },
+  };
+  const d = makeOpenAIDriver(client);
+  const exposed = [{ name: "mcp__contract-ops__lint_contract", description: "lint", inputSchema: { type: "object", properties: { path: { type: "string" } } } }];
+  const messages = [];
+  d.pushUser(messages, "lint a.md");
+  assert.deepEqual(messages[0], { role: "user", content: "lint a.md" });
+
+  const out = await d.infer({ system: "sp", tools: exposed, messages, model: "gpt-4o" });
+  // request shape: system prepended, tools as function type
+  assert.equal(seen.req.messages[0].role, "system");
+  assert.equal(seen.req.tools[0].type, "function");
+  assert.equal(seen.req.tools[0].function.name, "mcp__contract-ops__lint_contract");
+  assert.deepEqual(seen.req.tools[0].function.parameters, exposed[0].inputSchema);
+  // normalized output
+  assert.equal(out.text, "hi");
+  assert.deepEqual(out.toolCalls, [{ id: "t1", name: "mcp__contract-ops__lint_contract", input: { path: "a.md" } }]);
+
+  // tool results → one role:"tool" message each, error prefixed
+  const msgs = d.toolResultMessages([
+    { id: "t1", content: "findings...", isError: false },
+    { id: "t2", content: "nope", isError: true },
+  ]);
+  assert.deepEqual(msgs[0], { role: "tool", tool_call_id: "t1", content: "findings..." });
+  assert.match(msgs[1].content, /^ERROR: nope/);
+});
+
+test("O2: OpenAI driver tolerates malformed tool arguments (no throw)", async () => {
+  const client = { chat: { completions: { create: async () => ({
+    choices: [{ message: { content: "", tool_calls: [
+      { id: "x", type: "function", function: { name: "mcp__contract-ops__suite_status", arguments: "not json{" } },
+    ] } }],
+  }) } } };
+  const out = await makeOpenAIDriver(client).infer({ system: "s", tools: [], messages: [], model: "m" });
+  assert.deepEqual(out.toolCalls[0].input, {}); // malformed args → {} rather than a crash
 });
