@@ -41,9 +41,9 @@ test("C1: config round-trips and stamps the version", () => {
 test("C2: API key lives only in the 0600 credentials file, never in config.json", () => {
   const { env, dir } = tmpEnv();
   try {
-    saveApiKey("sk-ant-secret", env);
-    saveConfig({ workspace: "/w", auth: { mode: "api-key" } }, env);
-    assert.equal(loadApiKey(env), "sk-ant-secret");
+    saveApiKey("ANTHROPIC_API_KEY", "sk-ant-secret", env);
+    saveConfig({ workspace: "/w", model: "claude", auth: { mode: "api-key", envKey: "ANTHROPIC_API_KEY" } }, env);
+    assert.equal(loadApiKey("ANTHROPIC_API_KEY", env), "sk-ant-secret");
     const raw = readFileSync(configPath(env), "utf8");
     assert.doesNotMatch(raw, /sk-ant-secret/, "secret must not appear in config.json");
     if (process.platform !== "win32") {
@@ -56,18 +56,40 @@ test("C2: API key lives only in the 0600 credentials file, never in config.json"
 test("C3: applyAuth loads the stored key only when env has none", () => {
   const { env, dir } = tmpEnv();
   try {
-    saveApiKey("sk-stored", env);
+    saveApiKey("ANTHROPIC_API_KEY", "sk-stored", env);
     const e1 = { ...env };
-    assert.deepEqual(applyAuth({ auth: { mode: "api-key" } }, e1), { mode: "api-key", applied: true });
+    const r1 = applyAuth({ auth: { mode: "api-key", envKey: "ANTHROPIC_API_KEY" } }, e1);
+    assert.equal(r1.mode, "api-key"); assert.equal(r1.applied, true);
     assert.equal(e1.ANTHROPIC_API_KEY, "sk-stored");
     // an explicit env key wins — stored key must not overwrite it
     const e2 = { ...env, ANTHROPIC_API_KEY: "sk-explicit" };
-    applyAuth({ auth: { mode: "api-key" } }, e2);
+    applyAuth({ auth: { mode: "api-key", envKey: "ANTHROPIC_API_KEY" } }, e2);
     assert.equal(e2.ANTHROPIC_API_KEY, "sk-explicit");
+    // a v1 config (no envKey) still resolves to ANTHROPIC_API_KEY
+    const e1b = { ...env };
+    applyAuth({ auth: { mode: "api-key" } }, e1b);
+    assert.equal(e1b.ANTHROPIC_API_KEY, "sk-stored");
     // claude-code / env store nothing
     const e3 = { ...env };
     assert.equal(applyAuth({ auth: { mode: "claude-code" } }, e3).applied, false);
     assert.equal(e3.ANTHROPIC_API_KEY, undefined);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("C4: applyAuth + credentials are per-provider (OpenAI key coexists)", () => {
+  const { env, dir } = tmpEnv();
+  try {
+    saveApiKey("OPENAI_API_KEY", "sk-oai", env);
+    saveApiKey("ANTHROPIC_API_KEY", "sk-ant", env);
+    // both keys live in the one 0600 file
+    assert.equal(loadApiKey("OPENAI_API_KEY", env), "sk-oai");
+    assert.equal(loadApiKey("ANTHROPIC_API_KEY", env), "sk-ant");
+    // applyAuth targets exactly the configured provider's env var
+    const e = { ...env };
+    const r = applyAuth({ model: "openai/gpt-4o", auth: { mode: "api-key", envKey: "OPENAI_API_KEY" } }, e);
+    assert.equal(r.envKey, "OPENAI_API_KEY");
+    assert.equal(e.OPENAI_API_KEY, "sk-oai");
+    assert.equal(e.ANTHROPIC_API_KEY, undefined, "must not touch the Anthropic var");
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -91,18 +113,21 @@ test("D1: diagnose reports missing CLIs, PDF backend, and auth over a stubbed ch
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test("S1: setup wizard — API key path stores the secret out-of-band, config is clean", async () => {
+test("S1: setup wizard — Claude API key path stores the secret out-of-band", async () => {
   const { env, dir } = tmpEnv();
   try {
     const ask = scriptAsk([
       "",              // workspace → default cwd
-      "1",             // auth choice → API key
+      "1",             // provider → Claude
+      "1",             // auth → API key
       "sk-ant-typed",  // the key
     ]);
     const cfg = await runSetup({ ask, env, cwd: "/contracts", checkBin: async () => true });
     assert.equal(cfg.workspace, "/contracts");
+    assert.equal(cfg.model, "claude");
     assert.equal(cfg.auth.mode, "api-key");
-    assert.equal(loadApiKey(env), "sk-ant-typed");
+    assert.equal(cfg.auth.envKey, "ANTHROPIC_API_KEY");
+    assert.equal(loadApiKey("ANTHROPIC_API_KEY", env), "sk-ant-typed");
     assert.doesNotMatch(readFileSync(configPath(env), "utf8"), /sk-ant-typed/);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
@@ -110,22 +135,24 @@ test("S1: setup wizard — API key path stores the secret out-of-band, config is
 test("S2: setup wizard — Claude Code subscription path stores no secret", async () => {
   const { env, dir } = tmpEnv();
   try {
-    const ask = scriptAsk(["/my/contracts", "2"]);
+    const ask = scriptAsk(["/my/contracts", "1", "2"]); // workspace, provider→Claude, auth→subscription
     const cfg = await runSetup({ ask, env, cwd: "/tmp", checkBin: async () => true });
     assert.equal(cfg.workspace, "/my/contracts");
+    assert.equal(cfg.model, "claude");
     assert.equal(cfg.auth.mode, "claude-code");
-    assert.equal(loadApiKey(env), null, "no credentials file for the subscription path");
+    assert.equal(loadApiKey("ANTHROPIC_API_KEY", env), null);
     assert.ok(!existsSync(credentialsPath(env)));
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test("S3: setup wizard — an already-set env key is offered and adopted without prompting for one", async () => {
+test("S3: setup wizard — an already-set env key is offered and adopted", async () => {
   const { env, dir } = tmpEnv({ ANTHROPIC_API_KEY: "sk-env" });
   try {
-    const ask = scriptAsk(["", "y"]); // workspace default, then "use the env key? y"
+    const ask = scriptAsk(["", "1", "y"]); // workspace, provider→Claude, "use the env key? y"
     const cfg = await runSetup({ ask, env, cwd: "/c", checkBin: async () => true });
     assert.equal(cfg.auth.mode, "env");
-    assert.equal(loadApiKey(env), null, "env mode stores nothing");
+    assert.equal(cfg.auth.envKey, "ANTHROPIC_API_KEY");
+    assert.equal(loadApiKey("ANTHROPIC_API_KEY", env), null, "env mode stores nothing");
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -135,8 +162,22 @@ test("S4: setup wizard offers a suite install when CLIs are missing", async () =
     const installed = [];
     const runInstall = async (cmd) => installed.push(cmd);
     // checkBin false → every CLI reports missing → install is offered; answer yes.
-    const ask = scriptAsk(["y", "", "2"]); // install? y ; workspace default ; auth → claude-code
+    const ask = scriptAsk(["y", "", "1", "2"]); // install? ; workspace ; provider→Claude ; auth→subscription
     await runSetup({ ask, env, cwd: "/c", checkBin: async () => false, runInstall });
     assert.deepEqual(installed, [SUITE_INSTALLER]);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("S5: setup wizard — OpenAI path stores an OPENAI key + provider/model ref", async () => {
+  const { env, dir } = tmpEnv();
+  try {
+    const ask = scriptAsk(["", "2", "sk-openai-typed", ""]); // workspace, provider→OpenAI, key, model→default
+    const cfg = await runSetup({ ask, env, cwd: "/c", checkBin: async () => true });
+    assert.equal(cfg.model, "openai/gpt-4o");
+    assert.equal(cfg.auth.mode, "api-key");
+    assert.equal(cfg.auth.envKey, "OPENAI_API_KEY");
+    assert.equal(loadApiKey("OPENAI_API_KEY", env), "sk-openai-typed");
+    assert.equal(loadApiKey("ANTHROPIC_API_KEY", env), null, "no Anthropic key for the OpenAI path");
+    assert.doesNotMatch(readFileSync(configPath(env), "utf8"), /sk-openai-typed/);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
