@@ -72,7 +72,7 @@ if (isFirstRun()) {
 const cfg = loadConfig() ?? {};
 applyAuth(cfg);
 const workspace = resolve(flag("--workspace") ?? cfg.workspace ?? process.cwd());
-const provider = resolveProvider(cfg.model);            // cfg.model: "provider/model" ref or undefined → claude
+const provider = resolveProvider(cfg.model, cfg);       // cfg.model: "provider/model" ref or undefined → claude
 const model = flag("--model") ?? modelFromRef(cfg.model);
 
 const transcript = new Transcript(join(workspace, "transcripts"));

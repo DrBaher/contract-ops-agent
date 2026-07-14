@@ -181,3 +181,18 @@ test("S5: setup wizard — OpenAI path stores an OPENAI key + provider/model ref
     assert.doesNotMatch(readFileSync(configPath(env), "utf8"), /sk-openai-typed/);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("S6: setup wizard — OpenAI-compatible endpoint records a providers block + keyed secret", async () => {
+  const { env, dir } = tmpEnv();
+  try {
+    // workspace, provider→3(endpoint), name, baseUrl, key, model
+    const ask = scriptAsk(["", "3", "grok", "https://api.x.ai/v1", "sk-grok", "grok-2"]);
+    const cfg = await runSetup({ ask, env, cwd: "/c", checkBin: async () => true });
+    assert.equal(cfg.model, "grok/grok-2");
+    assert.deepEqual(cfg.providers.grok, { baseUrl: "https://api.x.ai/v1", apiKeyEnv: "GROK_API_KEY" });
+    assert.equal(cfg.auth.mode, "api-key");
+    assert.equal(cfg.auth.envKey, "GROK_API_KEY");
+    assert.equal(loadApiKey("GROK_API_KEY", env), "sk-grok");
+    assert.doesNotMatch(readFileSync(configPath(env), "utf8"), /sk-grok/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

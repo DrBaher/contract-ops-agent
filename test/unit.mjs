@@ -261,7 +261,7 @@ test("makeAsker resolves to {closed} on readline close instead of throwing", asy
 
 // --- v0.3 provider abstraction (offline) ---
 
-test("P1: provider registry resolves ids and provider/model refs", () => {
+test("P1: provider registry resolves built-ins, refs, and config endpoints", () => {
   assert.equal(resolveProvider("claude").id, "claude");
   assert.equal(resolveProvider("openai").id, "openai");
   assert.equal(resolveProvider("openai/gpt-4o").id, "openai");
@@ -269,7 +269,16 @@ test("P1: provider registry resolves ids and provider/model refs", () => {
   assert.equal(modelFromRef("openai/gpt-4o"), "gpt-4o");
   assert.equal(modelFromRef("openai/gpt-4o-mini-2026"), "gpt-4o-mini-2026");
   assert.equal(modelFromRef("claude"), undefined);
-  assert.throws(() => resolveProvider("gemini"), /unknown model provider/);
+
+  // an OpenAI-compatible endpoint defined in config resolves with no new code
+  const cfg = { providers: { gemini: { baseUrl: "https://x/v1", apiKeyEnv: "GEMINI_API_KEY", defaultModel: "gemini-2.0" } } };
+  const g = resolveProvider("gemini/gemini-2.0", cfg);
+  assert.equal(g.id, "gemini");
+  assert.equal(g.defaultModel, "gemini-2.0");
+  assert.deepEqual(g.envKeys, ["GEMINI_API_KEY"]);
+
+  assert.throws(() => resolveProvider("mystery"), /unknown model provider/);          // no cfg
+  assert.throws(() => resolveProvider("mystery", { providers: {} }), /unknown model provider/);
 });
 
 test("O1: OpenAI driver maps MCP tools → function tools and normalizes tool calls", async () => {

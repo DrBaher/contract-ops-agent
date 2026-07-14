@@ -82,11 +82,26 @@ export async function runSetup({ ask, env = process.env, cwd = process.cwd(), ch
   const pChoice = (await ask(
     "  1) Anthropic Claude — a Claude API key, or your existing Claude Code subscription\n" +
     "  2) OpenAI (GPT)     — your OpenAI API key\n" +
-    "  Choose [1/2]: ",
+    "  3) Other endpoint   — any OpenAI-compatible API (Gemini, Grok, DeepSeek, Ollama, a local server…)\n" +
+    "  Choose [1/2/3]: ",
   )).trim();
 
-  let model, auth;
-  if (pChoice === "2") {
+  let model, auth, providers;
+  if (pChoice === "3") {
+    // Any OpenAI-compatible endpoint — reaches the long tail with one adapter.
+    out("  Base-URL examples:");
+    out("    Gemini:  https://generativelanguage.googleapis.com/v1beta/openai/");
+    out("    Grok:    https://api.x.ai/v1        Ollama (local): http://localhost:11434/v1");
+    const name = ((await ask("  A short name for it [custom]: ")).trim() || "custom").toLowerCase().replace(/[^a-z0-9]+/g, "-");
+    const baseUrl = (await ask("  Base URL: ")).trim();
+    const envKey = `${name.toUpperCase().replace(/[^A-Z0-9]/g, "_")}_API_KEY`;
+    const key = (await ask("  API key (blank if the endpoint needs none): ")).trim();
+    if (key) { saveApiKey(envKey, key, env); auth = { mode: "api-key", envKey }; out("  Saved (chmod 600)."); }
+    else { auth = { mode: "env", envKey }; }
+    const m = (await ask("  Model id: ")).trim() || "default";
+    providers = { [name]: { baseUrl, apiKeyEnv: envKey } };
+    model = `${name}/${m}`;
+  } else if (pChoice === "2") {
     // OpenAI — API key only (subscription auth is a Claude-only path).
     const envKey = "OPENAI_API_KEY";
     if (env.OPENAI_API_KEY && yes(await ask("  Found OPENAI_API_KEY in your environment — use it? [Y/n] "))) {
@@ -123,7 +138,7 @@ export async function runSetup({ ask, env = process.env, cwd = process.cwd(), ch
     }
   }
 
-  const cfg = saveConfig({ workspace, model, auth }, env);
+  const cfg = saveConfig({ workspace, model, auth, ...(providers ? { providers } : {}) }, env);
 
   // ── Summary ─────────────────────────────────────────────────────────────
   out("");
