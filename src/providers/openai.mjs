@@ -5,7 +5,12 @@ import OpenAI from "openai";
 import { startLoopSession } from "../loop.mjs";
 
 function safeJson(s) {
-  try { return JSON.parse(s || "{}"); } catch { return {}; }
+  try {
+    const v = JSON.parse(s || "{}");
+    // Tool inputs must be a plain object; a valid-but-non-object (string, number,
+    // array, null) would confuse the gate and MCP call — coerce to {}.
+    return v && typeof v === "object" && !Array.isArray(v) ? v : {};
+  } catch { return {}; }
 }
 
 // The OpenAI dialect adapter. Exported for unit testing the format mapping
@@ -22,18 +27,27 @@ export function makeOpenAIDriver(client) {
         function: { name: t.name, description: t.description, parameters: t.inputSchema },
       }));
     },
-    async infer({ system, tools, messages, model }) {
-      const res = await client.chat.completions.create({
-        model,
-        messages: [{ role: "system", content: system }, ...messages],
-        tools: this.toOpenAITools(tools),
-        tool_choice: "auto",
-      });
+    async infer({ system, tools, messages, model, signal }) {
+      const res = await client.chat.completions.create(
+        {
+          model,
+          messages: [{ role: "system", content: system }, ...messages],
+          tools: this.toOpenAITools(tools),
+          tool_choice: "auto",
+        },
+        signal ? { signal } : {},
+      );
       const m = res.choices[0].message;
+      // Accept any tool_call carrying a function name — OpenAI-*compatible*
+      // endpoints (Gemini/Grok/Ollama/…) often omit the `type` field; filtering
+      // on type would drop the call yet leave the assistant's tool_calls in
+      // history, wedging the next request. If none normalize, drop tool_calls
+      // from the assistant message so history stays consistent.
       const toolCalls = (m.tool_calls ?? [])
-        .filter((tc) => tc.type === "function")
+        .filter((tc) => tc?.function?.name)
         .map((tc) => ({ id: tc.id, name: tc.function.name, input: safeJson(tc.function.arguments) }));
-      return { text: m.content || "", toolCalls, assistantMessage: m };
+      const assistantMessage = toolCalls.length ? m : { ...m, tool_calls: undefined };
+      return { text: m.content || "", toolCalls, assistantMessage };
     },
     // OpenAI wants one `role:"tool"` message per result, keyed by tool_call_id.
     toolResultMessages(results) {

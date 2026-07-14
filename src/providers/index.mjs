@@ -10,15 +10,23 @@ const PROVIDERS = {
   openai: openaiProvider,
 };
 
+export const RESERVED_PROVIDER_IDS = Object.keys(PROVIDERS);
+
 // Resolve a provider from a `provider/model` ref. Beyond the built-ins, a
 // `config.providers` entry defines an OpenAI-*compatible* endpoint (Gemini,
 // Grok, DeepSeek, Ollama, OpenRouter, a local server…): { baseUrl, apiKeyEnv?,
-// defaultModel? }. So `myllm/some-model` with a matching config entry works with
-// no new code — the whole long tail, one adapter.
+// defaultModel? } — so `myllm/some-model` works with no new code.
 export function resolveProvider(ref = "claude", cfg = null) {
   const id = String(ref).split("/")[0];
-  if (PROVIDERS[id]) return PROVIDERS[id];
   const custom = cfg?.providers?.[id];
+  // A config entry that shadows a built-in id is ambiguous — refuse it loudly
+  // rather than silently routing to the wrong host (built-ins default to their
+  // own endpoint and would ignore the configured baseUrl). The wizard also
+  // rejects reserved names up front, so this only trips on hand-edited config.
+  if (custom && PROVIDERS[id]) {
+    throw new Error(`config.providers."${id}" collides with the built-in "${id}" provider — rename the endpoint`);
+  }
+  if (PROVIDERS[id]) return PROVIDERS[id];
   if (custom?.baseUrl) {
     return makeOpenAIProvider({
       id,
@@ -27,11 +35,15 @@ export function resolveProvider(ref = "claude", cfg = null) {
       defaultModel: custom.defaultModel,
     });
   }
-  const known = [...Object.keys(PROVIDERS), ...Object.keys(cfg?.providers ?? {})];
+  // Only advertise genuinely usable endpoints (a config entry without a baseUrl
+  // is not resolvable).
+  const validCustom = Object.entries(cfg?.providers ?? {}).filter(([, v]) => v?.baseUrl).map(([k]) => k);
+  const known = [...RESERVED_PROVIDER_IDS, ...validCustom];
   throw new Error(`unknown model provider: "${id}" (have: ${known.join(", ")})`);
 }
 
 export function modelFromRef(ref) {
   const parts = String(ref ?? "").split("/");
-  return parts.length > 1 ? parts.slice(1).join("/") : undefined;
+  const model = parts.length > 1 ? parts.slice(1).join("/") : "";
+  return model || undefined; // "openai/" (empty model segment) → undefined, not ""
 }

@@ -279,6 +279,18 @@ test("P1: provider registry resolves built-ins, refs, and config endpoints", () 
 
   assert.throws(() => resolveProvider("mystery"), /unknown model provider/);          // no cfg
   assert.throws(() => resolveProvider("mystery", { providers: {} }), /unknown model provider/);
+
+  // a config endpoint that SHADOWS a built-in id must error, not silently route
+  // to the wrong host (the HIGH audit finding)
+  assert.throws(
+    () => resolveProvider("openai/x", { providers: { openai: { baseUrl: "https://gw/v1" } } }),
+    /collides with the built-in/,
+  );
+  // empty model segment → undefined (not "")
+  assert.equal(modelFromRef("openai/"), undefined);
+  // a config entry without a baseUrl is not advertised as available
+  try { resolveProvider("mystery", { providers: { half: {} } }); assert.fail("should throw"); }
+  catch (e) { assert.doesNotMatch(e.message, /half/); }
 });
 
 test("O1: OpenAI driver maps MCP tools → function tools and normalizes tool calls", async () => {
@@ -316,12 +328,36 @@ test("O1: OpenAI driver maps MCP tools → function tools and normalizes tool ca
   assert.match(msgs[1].content, /^ERROR: nope/);
 });
 
-test("O2: OpenAI driver tolerates malformed tool arguments (no throw)", async () => {
+test("O2: OpenAI driver tolerates malformed / non-object tool arguments (no throw)", async () => {
+  const mk = (args) => ({ chat: { completions: { create: async () => ({
+    choices: [{ message: { content: "", tool_calls: [
+      { id: "x", type: "function", function: { name: "mcp__contract-ops__suite_status", arguments: args } },
+    ] } }],
+  }) } } });
+  for (const args of ["not json{", "\"a string\"", "42", "[1,2]", "null"]) {
+    const out = await makeOpenAIDriver(mk(args)).infer({ system: "s", tools: [], messages: [], model: "m" });
+    assert.deepEqual(out.toolCalls[0].input, {}, `args ${args} should coerce to {}`);
+  }
+});
+
+test("O3: OpenAI driver accepts tool_calls that omit `type` (compatible endpoints)", async () => {
+  // Gemini/Grok/Ollama-style: tool_calls without a `type` field must still map.
   const client = { chat: { completions: { create: async () => ({
     choices: [{ message: { content: "", tool_calls: [
-      { id: "x", type: "function", function: { name: "mcp__contract-ops__suite_status", arguments: "not json{" } },
+      { id: "g1", function: { name: "mcp__contract-ops__lint_contract", arguments: '{"path":"x.md"}' } },
     ] } }],
   }) } } };
-  const out = await makeOpenAIDriver(client).infer({ system: "s", tools: [], messages: [], model: "m" });
-  assert.deepEqual(out.toolCalls[0].input, {}); // malformed args → {} rather than a crash
+  const d = makeOpenAIDriver(client);
+  const out = await d.infer({ system: "s", tools: [], messages: [], model: "m" });
+  assert.deepEqual(out.toolCalls, [{ id: "g1", name: "mcp__contract-ops__lint_contract", input: { path: "x.md" } }]);
+  assert.ok(out.assistantMessage.tool_calls, "assistant message keeps its tool_calls when calls were normalized");
+
+  // when NO tool_calls normalize, they're stripped from the assistant message so
+  // history doesn't wedge the next request
+  const empty = { chat: { completions: { create: async () => ({
+    choices: [{ message: { content: "hi", tool_calls: [{ id: "z" /* no function */ }] } }],
+  }) } } };
+  const out2 = await makeOpenAIDriver(empty).infer({ system: "s", tools: [], messages: [], model: "m" });
+  assert.deepEqual(out2.toolCalls, []);
+  assert.equal(out2.assistantMessage.tool_calls, undefined);
 });

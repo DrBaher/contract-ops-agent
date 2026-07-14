@@ -46,7 +46,13 @@ export function saveApiKey(envKey, key, env = process.env) {
   creds[envKey] = key;
   const p = credentialsPath(env);
   writeFileSync(p, JSON.stringify(creds) + "\n", { mode: 0o600 });
-  try { chmodSync(p, 0o600); } catch { /* best effort on platforms without chmod */ }
+  try {
+    chmodSync(p, 0o600);
+  } catch (e) {
+    // A pre-existing loosely-permissioned file whose chmod fails would leave the
+    // secret readable by others — surface it rather than swallow it.
+    process.stderr.write(`[contract-ops-agent] warning: could not set 0600 permissions on ${p} (${e.message}); the stored key may be readable by others.\n`);
+  }
 }
 
 export function loadApiKey(envKey = "ANTHROPIC_API_KEY", env = process.env) {

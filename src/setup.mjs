@@ -1,6 +1,7 @@
 import { resolve } from "node:path";
 import { saveConfig, saveApiKey } from "./config.mjs";
 import { diagnose, installPlan } from "./doctor.mjs";
+import { RESERVED_PROVIDER_IDS } from "./providers/index.mjs";
 
 const yes = (s, dflt = true) => {
   const t = String(s ?? "").trim();
@@ -28,7 +29,7 @@ function providerLabel(model) {
 // `checkBin` and `runInstall` are injected so tests never touch PATH or run real
 // installs. `out` receives the human-facing narration (no-op in tests). Writes
 // config + (optionally) the 0600 credentials file, and returns the saved config.
-export async function runSetup({ ask, env = process.env, cwd = process.cwd(), checkBin, runInstall, out = () => {} }) {
+export async function runSetup({ ask, askSecret = ask, env = process.env, cwd = process.cwd(), checkBin, runInstall, out = () => {} }) {
   out("");
   out("  contract-ops-agent");
   out("  A contract assistant that can use ONLY the contract-ops tools — extract,");
@@ -92,10 +93,16 @@ export async function runSetup({ ask, env = process.env, cwd = process.cwd(), ch
     out("  Base-URL examples:");
     out("    Gemini:  https://generativelanguage.googleapis.com/v1beta/openai/");
     out("    Grok:    https://api.x.ai/v1        Ollama (local): http://localhost:11434/v1");
-    const name = ((await ask("  A short name for it [custom]: ")).trim() || "custom").toLowerCase().replace(/[^a-z0-9]+/g, "-");
+    let name = ((await ask("  A short name for it [custom]: ")).trim() || "custom")
+      .toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+    if (!name) name = "custom"; // degenerate input (e.g. all separators) → sane default
+    if (RESERVED_PROVIDER_IDS.includes(name)) {
+      out(`  "${name}" is a built-in provider name — using "${name}-endpoint" so it doesn't collide.`);
+      name = `${name}-endpoint`;
+    }
     const baseUrl = (await ask("  Base URL: ")).trim();
     const envKey = `${name.toUpperCase().replace(/[^A-Z0-9]/g, "_")}_API_KEY`;
-    const key = (await ask("  API key (blank if the endpoint needs none): ")).trim();
+    const key = (await askSecret("  API key (blank if the endpoint needs none): ")).trim();
     if (key) { saveApiKey(envKey, key, env); auth = { mode: "api-key", envKey }; out("  Saved (chmod 600)."); }
     else { auth = { mode: "env", envKey }; }
     const m = (await ask("  Model id: ")).trim() || "default";
@@ -107,7 +114,7 @@ export async function runSetup({ ask, env = process.env, cwd = process.cwd(), ch
     if (env.OPENAI_API_KEY && yes(await ask("  Found OPENAI_API_KEY in your environment — use it? [Y/n] "))) {
       auth = { mode: "env", envKey };
     } else {
-      const key = (await ask("  Paste your OpenAI API key: ")).trim();
+      const key = (await askSecret("  Paste your OpenAI API key: ")).trim();
       if (key) { saveApiKey(envKey, key, env); auth = { mode: "api-key", envKey }; out("  Saved (chmod 600), sent only to OpenAI."); }
       else { auth = { mode: "env", envKey }; out("  No key entered — it'll read OPENAI_API_KEY from your environment."); }
     }
@@ -131,7 +138,7 @@ export async function runSetup({ ask, env = process.env, cwd = process.cwd(), ch
         auth = { mode: "claude-code" };
         out("  Great — it'll use your Claude Code login. (Not logged in yet? Run:  claude setup-token)");
       } else {
-        const key = (await ask("  Paste your Anthropic API key: ")).trim();
+        const key = (await askSecret("  Paste your Anthropic API key: ")).trim();
         if (key) { saveApiKey(envKey, key, env); auth = { mode: "api-key", envKey }; out("  Saved (chmod 600)."); }
         else { auth = { mode: "env", envKey }; out("  No key entered — it'll read ANTHROPIC_API_KEY from your environment."); }
       }

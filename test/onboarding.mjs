@@ -196,3 +196,28 @@ test("S6: setup wizard — OpenAI-compatible endpoint records a providers block 
     assert.doesNotMatch(readFileSync(configPath(env), "utf8"), /sk-grok/);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("S7: endpoint name that collides with a built-in is suffixed (no wrong-host routing)", async () => {
+  const { env, dir } = tmpEnv();
+  try {
+    const ask = scriptAsk(["", "3", "openai", "https://my-gateway/v1", "sk-gw", "some-model"]);
+    const cfg = await runSetup({ ask, env, cwd: "/c", checkBin: async () => true });
+    assert.equal(cfg.model, "openai-endpoint/some-model", "reserved name must be renamed, not left as 'openai'");
+    assert.ok(cfg.providers["openai-endpoint"], "endpoint stored under the suffixed name");
+    assert.equal(cfg.providers.openai, undefined, "must NOT shadow the built-in openai provider");
+    assert.equal(cfg.auth.envKey, "OPENAI_ENDPOINT_API_KEY");
+    assert.equal(loadApiKey("OPENAI_ENDPOINT_API_KEY", env), "sk-gw");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("S8: degenerate endpoint name falls back to 'custom'", async () => {
+  const { env, dir } = tmpEnv();
+  try {
+    const ask = scriptAsk(["", "3", "@#$", "https://x/v1", "", "m"]); // junk name, blank key → env mode
+    const cfg = await runSetup({ ask, env, cwd: "/c", checkBin: async () => true });
+    assert.equal(cfg.model, "custom/m");
+    assert.ok(cfg.providers.custom);
+    assert.equal(cfg.auth.mode, "env");
+    assert.equal(cfg.auth.envKey, "CUSTOM_API_KEY");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
