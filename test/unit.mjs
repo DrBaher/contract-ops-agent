@@ -5,11 +5,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { decide, makeCanUseTool, newSessionState, READ_ONLY, PREFIX } from "../src/gates.mjs";
-import { buildOptions, DISALLOWED_TOOLS, mcpServerEnv } from "../src/options.mjs";
+import { buildOptions, DISALLOWED_TOOLS, makeInputQueue } from "../src/providers/claude.mjs";
+import { mcpServerEnv } from "../src/mcp-client.mjs";
 import { assertEnclosure } from "../src/enclosure-assert.mjs";
 import { Transcript } from "../src/transcript.mjs";
 import { preflight, renderPreflight } from "../src/preflight.mjs";
-import { makeInputQueue, makeAsker } from "../src/repl.mjs";
+import { makeAsker } from "../src/repl.mjs";
 
 const t = (short) => `${PREFIX}${short}`;
 

@@ -2,12 +2,11 @@
 import readline from "node:readline";
 import { execSync } from "node:child_process";
 import { resolve, join } from "node:path";
-import { buildOptions } from "../src/options.mjs";
-import { makeCanUseTool, newSessionState } from "../src/gates.mjs";
 import { SYSTEM_PROMPT } from "../src/system-prompt.mjs";
 import { Transcript } from "../src/transcript.mjs";
 import { preflight, renderPreflight } from "../src/preflight.mjs";
 import { startRepl, makeAsker } from "../src/repl.mjs";
+import { resolveProvider, modelFromRef } from "../src/providers/index.mjs";
 import { isFirstRun, loadConfig, applyAuth, configDir } from "../src/config.mjs";
 import { runSetup } from "../src/setup.mjs";
 import { diagnose, renderDoctor, installPlan } from "../src/doctor.mjs";
@@ -73,25 +72,16 @@ if (isFirstRun()) {
 const cfg = loadConfig() ?? {};
 applyAuth(cfg);
 const workspace = resolve(flag("--workspace") ?? cfg.workspace ?? process.cwd());
-const model = flag("--model") ?? cfg.model;
+const provider = resolveProvider(cfg.model);            // cfg.model: "provider/model" ref or undefined → claude
+const model = flag("--model") ?? modelFromRef(cfg.model);
 
 const transcript = new Transcript(join(workspace, "transcripts"));
 
 console.log(renderPreflight(await preflight()));
+console.log(`provider:   ${provider.id}`);
 console.log(`workspace:  ${workspace}`);
 console.log(`transcript: ${transcript.path}`);
 console.log(`config:     ${join(configDir(), "config.json")}`);
 console.log(`(type /quit to exit)\n`);
 
-const session = newSessionState();
-
-await startRepl({
-  transcript,
-  options: (gatePrompter) =>
-    buildOptions({
-      workspace,
-      model,
-      systemPrompt: SYSTEM_PROMPT,
-      canUseTool: makeCanUseTool(session, gatePrompter, (e) => transcript.write(e)),
-    }),
-});
+await startRepl({ provider, workspace, systemPrompt: SYSTEM_PROMPT, model, transcript });

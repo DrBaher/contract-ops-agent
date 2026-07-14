@@ -1,51 +1,18 @@
 import readline from "node:readline";
-import { query } from "@anthropic-ai/claude-agent-sdk";
 import { assertEnclosure } from "./enclosure-assert.mjs";
-
-function sdkUserMessage(text) {
-  return {
-    type: "user",
-    message: { role: "user", content: [{ type: "text", text }] },
-    parent_tool_use_id: null,
-  };
-}
-
-// Minimal async queue so the readline loop can feed the SDK's streaming-input
-// prompt iterable one user turn at a time.
-export function makeInputQueue() {
-  const items = [];
-  let wake = null;
-  let closed = false;
-  return {
-    push(v) {
-      items.push(v);
-      if (wake) { const w = wake; wake = null; w(); }
-    },
-    close() {
-      closed = true;
-      if (wake) { const w = wake; wake = null; w(); }
-    },
-    async *[Symbol.asyncIterator]() {
-      for (;;) {
-        while (items.length) yield items.shift();
-        if (closed) return;
-        await new Promise((res) => { wake = res; });
-      }
-    },
-  };
-}
+import { makeCanUseTool, newSessionState } from "./gates.mjs";
 
 // Serialize every readline question through one chain so a mid-turn gate prompt
 // and a between-turn prompt can never be armed concurrently (Node's readline
 // silently drops a second concurrent question). Each call may pass an
-// AbortSignal; aborting resolves it to { aborted: true } without leaving the
-// callback dangling.
+// AbortSignal; aborting resolves it to { aborted: true }. A closed stdin (EOF /
+// Ctrl-D) resolves to { closed: true } instead of throwing ERR_USE_AFTER_CLOSE.
 export function makeAsker(rl) {
   let chain = Promise.resolve();
   let closed = false;
   rl.on("close", () => { closed = true; });
   const run = (question, signal) => new Promise((resolve) => {
-    if (closed) return resolve({ closed: true });      // stdin ended (EOF / Ctrl-D)
+    if (closed) return resolve({ closed: true });
     if (signal?.aborted) return resolve({ aborted: true });
     let done = false;
     const finish = (v) => {
@@ -56,13 +23,13 @@ export function makeAsker(rl) {
       resolve(v);
     };
     const onAbort = () => finish({ aborted: true });
-    const onClose = () => finish({ closed: true });    // readline closed mid-question
+    const onClose = () => finish({ closed: true });
     signal?.addEventListener("abort", onAbort, { once: true });
     rl.on("close", onClose);
     try {
       rl.question(question, signal ? { signal } : {}, (answer) => finish({ answer }));
     } catch {
-      finish({ closed: true });                        // question after close → treat as EOF
+      finish({ closed: true });
     }
   });
   return (question, signal) => {
@@ -72,10 +39,12 @@ export function makeAsker(rl) {
   };
 }
 
-export async function startRepl({ options, transcript, input = process.stdin, output = process.stdout }) {
+// Provider-agnostic REPL. It owns the terminal (readline, gate prompts,
+// transcript) and drives whatever `provider` hands back a normalized Session:
+//   events: { type: "enclosure", tools } | { "text", text } | { "tool_use", name, input } | { "turn_end", meta }
+export async function startRepl({ provider, workspace, systemPrompt, model, transcript, input = process.stdin, output = process.stdout }) {
   const rl = readline.createInterface({ input, output });
   const ask = makeAsker(rl);
-  const queue = makeInputQueue();
 
   // A pending gate question registers its AbortController here so SIGINT can
   // cancel it (→ declined, no approval recorded) instead of deadlocking.
@@ -85,67 +54,58 @@ export async function startRepl({ options, transcript, input = process.stdin, ou
     activeGateAbort = ctl;
     try {
       const { answer, aborted, closed } = await ask(`\n⚖ gate: ${detail}\n  approve? [y/N] `, ctl.signal);
-      if (aborted || closed) return false;             // interrupted or EOF → decline, don't hang
+      if (aborted || closed) return false;
       return /^y(es)?$/i.test(String(answer).trim());
     } finally {
       if (activeGateAbort === ctl) activeGateAbort = null;
     }
   };
+  const canUseTool = makeCanUseTool(newSessionState(), gatePrompter, (e) => transcript.write(e));
 
   const r0 = await ask("contract-ops-agent> ");
   const first = r0.closed ? null : r0.answer?.trim();
   if (!first || first === "/quit") { if (!r0.closed) rl.close(); return; }
-  queue.push(sdkUserMessage(first));
-  transcript.write({ type: "user", text: first });
 
-  const session = query({ prompt: queue, options: options(gatePrompter) });
+  const session = provider.startSession({ workspace, systemPrompt, model, canUseTool });
+  session.send(first);
+  transcript.write({ type: "user", text: first });
 
   let interrupted = false;
   rl.on("SIGINT", async () => {
-    // Cancel a pending gate first so it resolves to "declined" (no hang, no
-    // stale approval), then interrupt the turn.
     if (activeGateAbort) activeGateAbort.abort();
     if (interrupted) { rl.close(); process.exit(130); }
     interrupted = true;
     output.write("\n[interrupting — Ctrl-C again to exit]\n");
-    try { await session.interrupt(); } catch { /* session may already be idle */ }
+    try { await session.interrupt(); } catch { /* already idle */ }
   });
 
   let verified = false;
-  for await (const message of session) {
-    if (message.type === "system" && message.subtype === "init") {
-      const n = assertEnclosure(message);
+  for await (const ev of session.events()) {
+    if (ev.type === "enclosure") {
+      const n = assertEnclosure({ tools: ev.tools });
       verified = true;
       output.write(`[enclosure verified: ${n} contract-ops tools, nothing else]\n`);
-      transcript.write({ type: "init", tools: message.tools });
+      transcript.write({ type: "init", tools: ev.tools });
       continue;
     }
-    // Fail closed: no model output may be processed before the enclosure is
-    // verified. If the SDK ever changes the init message shape, this throws
-    // rather than silently running an unverified session.
-    if (!verified && (message.type === "assistant" || message.type === "result")) {
-      throw new Error("Enclosure not verified before model activity — refusing to continue (SDK init message shape may have changed).");
+    // Fail closed: no model output before the enclosure is verified.
+    if (!verified) {
+      throw new Error("Enclosure not verified before model activity — refusing to continue.");
     }
-    if (message.type === "assistant") {
-      for (const block of message.message?.content ?? []) {
-        if (block.type === "text" && block.text) {
-          output.write(`\n${block.text}\n`);
-          transcript.write({ type: "assistant", text: block.text });
-        } else if (block.type === "tool_use") {
-          output.write(`  ⚙ ${block.name} ${JSON.stringify(block.input)}\n`);
-          transcript.write({ type: "tool_use", tool: block.name, input: block.input });
-        }
-      }
-      continue;
-    }
-    if (message.type === "result") {
+    if (ev.type === "text") {
+      output.write(`\n${ev.text}\n`);
+      transcript.write({ type: "assistant", text: ev.text });
+    } else if (ev.type === "tool_use") {
+      output.write(`  ⚙ ${ev.name} ${JSON.stringify(ev.input)}\n`);
+      transcript.write({ type: "tool_use", tool: ev.name, input: ev.input });
+    } else if (ev.type === "turn_end") {
       interrupted = false;
-      transcript.write({ type: "result", subtype: message.subtype, turns: message.num_turns, cost: message.total_cost_usd });
+      transcript.write({ type: "result", ...ev.meta });
       const r = await ask("\ncontract-ops-agent> ");
       const next = r.closed ? null : r.answer?.trim();
-      if (!next || next === "/quit") { queue.close(); break; }   // EOF, blank, or /quit → exit
+      if (!next || next === "/quit") { session.end(); break; }
       transcript.write({ type: "user", text: next });
-      queue.push(sdkUserMessage(next));
+      session.send(next);
     }
   }
   if (!rl.closed) rl.close();
