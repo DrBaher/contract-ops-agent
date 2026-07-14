@@ -63,9 +63,8 @@ if (sub === "setup") {
 
 // Default: start the agent. First run walks the wizard, then drops into the REPL.
 if (isFirstRun()) {
-  console.log("First run — let's get you set up.\n");
   await withAsker((ask) => runSetup({ ask, runInstall, out: (m) => console.log(m) }));
-  console.log("");
+  console.log("\nStarting…\n");
 }
 
 const cfg = loadConfig() ?? {};

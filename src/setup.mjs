@@ -8,51 +8,88 @@ const yes = (s, dflt = true) => {
   return /^y(es)?$/i.test(t);
 };
 
-// The first-run wizard. `ask(question) -> Promise<string>` is injected so tests
-// drive it with scripted answers; `checkBin` and `runInstall` are injected so
-// tests never touch PATH or run real installs. Writes config + (optionally) the
-// 0600 credentials file, and returns the saved config.
+function authLabel(auth) {
+  switch (auth.mode) {
+    case "api-key": return "Anthropic API key (stored locally)";
+    case "claude-code": return "Claude Code subscription";
+    case "env": return "ANTHROPIC_API_KEY from the environment";
+    default: return auth.mode;
+  }
+}
+
+// The guided first-run wizard (our `openclaw onboard`). `ask(question) ->
+// Promise<string>` is injected so tests drive it with scripted answers;
+// `checkBin` and `runInstall` are injected so tests never touch PATH or run real
+// installs. `out` receives the human-facing narration (no-op in tests). Writes
+// config + (optionally) the 0600 credentials file, and returns the saved config.
 export async function runSetup({ ask, env = process.env, cwd = process.cwd(), checkBin, runInstall, out = () => {} }) {
-  // 1. Environment doctor + optional install of missing CLIs.
+  out("");
+  out("  contract-ops-agent — contract work in an enclosure.");
+  out("  Its only tools are the contract-ops suite: no shell, no files, no signing.");
+  out("");
+
+  // ── Step 1/3 · Environment ──────────────────────────────────────────────
+  out("Step 1/3 · Environment");
   const diag = await diagnose({ checkBin, env });
-  if (diag.missing.length) {
-    out(`Missing ${diag.missing.length} of ${diag.cliRows.length} CLIs: ${diag.missing.map((m) => m.bin).join(", ")}`);
-    if (runInstall && yes(await ask("Install the contract-ops suite now? [Y/n] "))) {
-      await runInstall(installPlan(diag.missing).suite);
+  const okCount = diag.cliRows.length - diag.missing.length;
+  if (diag.missing.length === 0) {
+    out(`  ✓ all ${diag.cliRows.length} contract-ops CLIs present`);
+  } else {
+    out(`  ${okCount}/${diag.cliRows.length} CLIs present — missing: ${diag.missing.map((m) => m.bin).join(", ")}`);
+    if (runInstall) {
+      const choice = (await ask("  Install? [A]ll · [c]hoose · [s]kip: ")).trim().toLowerCase();
+      if (choice === "c" || choice === "choose") {
+        for (const c of installPlan(diag.missing).perCli) {
+          if (yes(await ask(`    install ${c.bin}? [Y/n] `))) await runInstall(c.command);
+        }
+      } else if (choice === "s" || choice === "skip" || /^n/.test(choice)) {
+        out("  Skipped — those tools stay unavailable until installed.");
+      } else {
+        await runInstall(installPlan(diag.missing).suite); // default / "a" / "all" / "y"
+        out("  Installed. (Run `contract-ops-agent doctor` any time to re-check.)");
+      }
     }
   }
-  if (!diag.pdfBackend) {
-    out("Note: no PDF backend (LibreOffice/soffice) found — convert_to_pdf stays unavailable until one is installed.");
-  }
+  out(diag.pdfBackend
+    ? "  ✓ PDF backend present"
+    : "  ⚠ no PDF backend (LibreOffice) — convert_to_pdf will be unavailable");
+  out("");
 
-  // 2. Workspace.
-  const wsAns = (await ask(`Workspace directory [${cwd}]: `)).trim();
+  // ── Step 2/3 · Workspace ────────────────────────────────────────────────
+  out("Step 2/3 · Workspace");
+  const wsAns = (await ask(`  Directory the tools may touch [${cwd}]: `)).trim();
   const workspace = resolve(wsAns || cwd);
+  out("");
 
-  // 3. Auth — delegate, never implement claude.ai login.
+  // ── Step 3/3 · Authentication (delegate, never implement claude.ai login) ─
+  out("Step 3/3 · Authentication");
   let auth;
-  if (env.ANTHROPIC_API_KEY && yes(await ask("ANTHROPIC_API_KEY is already set — use it? [Y/n] "))) {
+  if (env.ANTHROPIC_API_KEY && yes(await ask("  ANTHROPIC_API_KEY is already set — use it? [Y/n] "))) {
     auth = { mode: "env" };
   }
   if (!auth) {
     const choice = (await ask(
-      "Authenticate with:\n" +
       "  1) Anthropic API key (stored locally, 0600)\n" +
       "  2) Claude Code subscription (uses your existing Claude Code login)\n" +
-      "Choose [1/2]: ",
+      "  Choose [1/2]: ",
     )).trim();
     if (choice === "2") {
       auth = { mode: "claude-code" };
-      out("Using your Claude Code login. If you're not logged in yet, run:  claude setup-token");
+      out("  Using your Claude Code login. If you're not logged in yet, run:  claude setup-token");
     } else {
-      const key = (await ask("Paste your Anthropic API key: ")).trim();
+      const key = (await ask("  Paste your Anthropic API key: ")).trim();
       if (key) { saveApiKey(key, env); auth = { mode: "api-key" }; }
-      else { auth = { mode: "env" }; out("No key entered — will read ANTHROPIC_API_KEY from the environment at runtime."); }
+      else { auth = { mode: "env" }; out("  No key entered — will read ANTHROPIC_API_KEY from the environment."); }
     }
   }
 
-  // 4. Persist (secret, if any, already went to credentials.json — never here).
   const cfg = saveConfig({ workspace, auth }, env);
-  out("Saved configuration.");
+
+  // ── Summary ─────────────────────────────────────────────────────────────
+  out("");
+  out("You're set:");
+  out("  provider    Claude");
+  out(`  workspace   ${workspace}`);
+  out(`  auth        ${authLabel(auth)}`);
   return cfg;
 }
