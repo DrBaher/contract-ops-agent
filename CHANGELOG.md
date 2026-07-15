@@ -2,6 +2,23 @@
 
 All notable changes to contract-ops-agent. Dates are release dates.
 
+## 0.10.0 — 2026-07-15
+
+**Fuller vault coverage** (requires `contract-ops-mcp` ≥ 0.3.0)
+- The template vault gains browse/inspect/compose: `template_vault_list`,
+  `info`, `diff`, `history`, `clauses`, `clause_library`, `compare_clauses`,
+  `stats`, `verify` (read-only) plus `compose`, `swap`, `export` (gated
+  writes). Previously only find/get were exposed.
+- The contract vault gains obligations & lifecycle: `contract_vault_
+  obligations`, `remind` (an open-reminder digest built for agents),
+  `at_risk`, `review`, `verify`, `export` (read-only) plus `ingest`
+  (register a contract from extract output), `obligation` (status/owner/
+  recurrence), `accept` (mark fields verified) — gated writes.
+- Gating: all vault reads allow; the six vault writes are y/N gated. 50
+  tools total. This closes the last significant CLI-surface gap — every
+  suite CLI's real capabilities are now curated tools (the remaining long
+  tail stays on the `run` escape hatch).
+
 ## 0.9.0 — 2026-07-15
 
 **NDA review & negotiation** (requires `contract-ops-mcp` ≥ 0.2.0)

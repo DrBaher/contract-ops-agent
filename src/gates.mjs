@@ -13,12 +13,26 @@ export const READ_ONLY = new Set([
   "catalog", "suite_status",
   // NDA negotiation — read-only views over a negotiation state file
   "negotiate_status", "negotiate_review", "negotiate_diff", "negotiate_analyze", "negotiate_validate",
+  // Template vault — browse/inspect (compose/swap/export write, see NDA_WRITES-style set below)
+  "template_vault_list", "template_vault_info", "template_vault_diff", "template_vault_history",
+  "template_vault_clauses", "template_vault_clause_library", "template_vault_compare_clauses",
+  "template_vault_stats", "template_vault_verify",
+  // Contract vault — obligations/reminders/register reads (export writes no file)
+  "contract_vault_obligations", "contract_vault_remind", "contract_vault_at_risk",
+  "contract_vault_review", "contract_vault_verify", "contract_vault_export",
 ]);
 
 // NDA tools that WRITE a draft/config file but sign nothing — gated y/N, like
 // fill_template/convert_to_pdf. (negotiate_finalize only emits final docs from
 // an already-converged state; no new signature is applied.)
 const NDA_WRITES = new Set(["nda_setup", "generate_redlines", "draft_nda", "negotiate_finalize"]);
+
+// Vault tools that WRITE — a new template version, a file export, or a change to
+// the contract register. Gated y/N. Reads live in READ_ONLY above.
+const VAULT_WRITES = new Set([
+  "template_vault_compose", "template_vault_swap", "template_vault_export",
+  "contract_vault_ingest", "contract_vault_obligation", "contract_vault_accept",
+]);
 
 // Negotiation acts that SIGN a round in the state file's hash chain — a binding
 // commitment. Gated with the SAME typed-consent discipline as sign-cli acts:
@@ -119,6 +133,11 @@ export function decide(toolName, input = {}, session = newSessionState()) {
   if (NDA_WRITES.has(short)) {
     const out = input.out ?? input.out_md ?? "";
     return { kind: "confirm", key: null, detail: `${short} — NDA write${out ? ` → ${out}` : ""}${short === "nda_setup" ? " (one-time org policy in the workspace)" : ""}` };
+  }
+
+  if (VAULT_WRITES.has(short)) {
+    const target = input.as_ref ?? input.target ?? input.output ?? input.file ?? input.deal ?? "";
+    return { kind: "confirm", key: null, detail: `${short} — vault write${target ? ` (${target})` : ""}` };
   }
 
   if (short === "fill_template") {

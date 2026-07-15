@@ -371,3 +371,22 @@ test("N2: REPL typed gate fires for a negotiate sign act (wrong declines, exact 
   assert.match(printed, /NEGOTIATION SIGNATURE on "neg.json"/);
   assert.match(printed, /exactly: neg.json/);
 });
+
+// --- Vault browse/compose gate policy ---
+test("N3: vault reads allow; vault writes gate y/N", () => {
+  const t = (n) => `${PREFIX}${n}`;
+  const sess = newSessionState();
+  for (const r of ["template_vault_list", "template_vault_info", "template_vault_diff", "template_vault_history",
+    "template_vault_clauses", "template_vault_clause_library", "template_vault_compare_clauses", "template_vault_stats",
+    "template_vault_verify", "contract_vault_obligations", "contract_vault_remind", "contract_vault_at_risk",
+    "contract_vault_review", "contract_vault_verify", "contract_vault_export"]) {
+    assert.equal(decide(t(r), {}, sess).kind, "allow", r);
+  }
+  for (const w of ["template_vault_compose", "template_vault_swap", "template_vault_export",
+    "contract_vault_ingest", "contract_vault_obligation", "contract_vault_accept"]) {
+    const d = decide(t(w), { as_ref: "x", target: "y", output: "o.docx", file: "f.json", deal: "d" }, sess);
+    assert.equal(d.kind, "confirm", w);
+    assert.equal(d.challenge, undefined, `${w} is a y/N write, not typed`);
+    assert.match(d.detail, /vault write/);
+  }
+});
