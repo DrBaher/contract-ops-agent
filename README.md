@@ -4,8 +4,13 @@ A terminal agent for contract work, in an **enclosure**: the agent's only tools
 are the [contract-ops](https://cli.drbaher.com/) suite, exposed through
 `contract-ops-mcp`. No shell, no filesystem access, no web, no signing — not by
 policy but by construction. If a request can't be served by extract, lint,
-compare, fill, convert, review, the vaults, or verify, the agent literally has
-no way to do it.
+compare, fill, convert, review, draft, negotiate, the vaults, or verify, the
+agent literally has no way to do it.
+
+It also handles **NDA review and negotiation**: score an NDA against your house
+playbook, generate clause-ready redlines, draft from a template, and run a
+round-based negotiation. Signing a negotiation round is a binding commitment,
+so — like signing itself — it stops at a typed-consent gate you approve.
 
 Bring your own model: Claude (API key or your existing Claude Code login),
 OpenAI, or any OpenAI-compatible endpoint (Gemini, Grok, DeepSeek, Ollama,

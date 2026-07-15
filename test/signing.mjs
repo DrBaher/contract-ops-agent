@@ -342,3 +342,32 @@ test("N1: negotiation read-only views allow; writes confirm; sign acts need type
   // a sign act with no target is denied, not blindly challenged
   assert.equal(decide(t("negotiate_accept"), {}, sess).kind, "deny");
 });
+
+test("N2: REPL typed gate fires for a negotiate sign act (wrong declines, exact approves)", async () => {
+  const outcomes = [];
+  const provider = {
+    id: "fake", envKeys: [], keyOptional: true,
+    startSession({ canUseTool }) {
+      const inbox = makeInputQueue();
+      return {
+        send(t) { inbox.push(t); }, end() { inbox.close(); }, async interrupt() {},
+        async *events() {
+          yield { type: "enclosure", tools: [`${PREFIX}lint_contract`] };
+          for await (const _t of inbox) {
+            const o = await canUseTool(`${PREFIX}negotiate_init`, { out: "neg.json", purpose: "x" });
+            outcomes.push(o.behavior);
+            yield { type: "text", text: `gate said ${o.behavior}` };
+            yield { type: "turn_end", meta: {} };
+          }
+        },
+      };
+    },
+  };
+  const input = new PassThrough(); input.isTTY = true; // negotiation signature needs a TTY
+  const output = new PassThrough(); let printed = ""; output.on("data", (c) => { printed += c.toString(); });
+  input.write("start it\nwrong.json\nstart again\nneg.json\n/quit\n");
+  await startRepl({ provider, model: "m", workspace: "/w", systemPromptFor: () => "sp", transcript: { write() {} }, input, output });
+  assert.deepEqual(outcomes, ["deny", "allow"]);
+  assert.match(printed, /NEGOTIATION SIGNATURE on "neg.json"/);
+  assert.match(printed, /exactly: neg.json/);
+});

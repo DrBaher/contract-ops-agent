@@ -61,7 +61,7 @@ test("loop exposes only prefixed contract-ops tools and executes a real one via 
 
   const enclosure = events.find((e) => e.type === "enclosure");
   assert.ok(enclosure, "no enclosure event");
-  assert.equal(enclosure.tools.length, 17);
+  assert.equal(enclosure.tools.length, 29); // 17 core + 12 NDA drafting/negotiation (contract-ops-mcp 0.2.0)
   assert.ok(enclosure.tools.every((n) => n.startsWith(PREFIX)), "a non-contract-ops tool was exposed");
 
   const toolUse = events.find((e) => e.type === "tool_use");

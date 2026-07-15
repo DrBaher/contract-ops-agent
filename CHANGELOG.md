@@ -2,6 +2,23 @@
 
 All notable changes to contract-ops-agent. Dates are release dates.
 
+## 0.9.0 — 2026-07-15
+
+**NDA review & negotiation** (requires `contract-ops-mcp` ≥ 0.2.0)
+- Beyond `review_nda`, the agent can now **draft** NDAs from a template
+  (`draft_nda`), **generate clause-ready redlines** from a review
+  (`generate_redlines`), run a one-time org-policy setup (`nda_setup`), and
+  drive a **round-based negotiation**: `negotiate_status/review/diff/analyze/
+  validate` (read-only views) and `negotiate_init/counter/accept/finalize`.
+- Gating: read-only views allow; draft/redlines/setup/finalize are y/N writes;
+  **`negotiate_init/counter/accept` sign a round** in the state file's hash
+  chain — a binding commitment — so they use the same **typed-consent gate** as
+  signing (type the target back, interactive-TTY only, never remembered).
+  `finalize` emits the final `.md`/`.docx` but applies **no e-signature** — the
+  legal signature stays with the human via sign-cli.
+- Verified live: a real model ran setup → review → draft → negotiate_init →
+  status, with the sign act passing through the typed gate.
+
 ## 0.8.0 — 2026-07-15
 
 **Security** (found by an adversarial review of the signing surface)
