@@ -57,7 +57,7 @@ The single hard rule (OpenClaw's reinstatement came "with a catch"; the standing
 - **No claude.ai login flow** (delegate to Claude Code — §3).
 - **No hosting / no credential proxying.** Local-first, BYO-auth.
 - **No bundling the Python CLIs.** npm can't pull them; doctor *installs* them, it doesn't vendor them. The container image (`ghcr.io/drbaher/contract-ops`) remains the separate "zero-setup" path, out of scope here.
-- **No direct-CLI passthrough yet** (`contract-ops-agent lint …` running the raw CLI). Deferred; if added later it must keep the sign guard and path confinement (own decision gate).
+- ~~**No direct-CLI passthrough yet**~~ — shipped in v0.4 as `contract-ops-agent tool <name> '{json}'`: it drives the tool through the same MCP mount (path confinement + sign guard intact) and the same gate policy (consequential tools confirm interactively).
 
 ## 7. Prerequisites (outside this build, block a real public launch)
 

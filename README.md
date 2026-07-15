@@ -34,16 +34,24 @@ goes straight to the REPL. Config is saved under
 
 ```
 contract-ops-agent [--workspace <dir>] [--model <model>]   start the agent
+contract-ops-agent --resume [last|<transcript.jsonl>]      continue a prior conversation
 contract-ops-agent setup                                   (re)run the setup wizard
 contract-ops-agent doctor                                  check environment + auth; migrate old configs
+contract-ops-agent tool [<name> ['{json}']]                list tools, or run one directly (no model)
 ```
 
 In the REPL, type contract requests in plain language; `/help` lists commands;
-`/quit` (or Ctrl-D) exits; Ctrl-C interrupts the current turn, twice to exit.
-While the model works you get a spinner, each executed tool is echoed as
-`⚙ tool {args}`, and every turn ends with an accounting footer (tool calls,
-and cost or token usage depending on the provider). Input can also be piped:
-`echo "lint agreement.md" | contract-ops-agent` runs one scripted session.
+`/model` shows or switches the model mid-session (`/model gemini` — context
+resets, the enclosure is re-verified); `/quit` (or Ctrl-D) exits; Ctrl-C
+interrupts the current turn, twice to exit. While the model works you get a
+spinner, each executed tool is echoed as `⚙ tool {args}`, and every turn ends
+with an accounting footer (tool calls, and cost or token usage depending on
+the provider). Input can also be piped: `echo "lint agreement.md" |
+contract-ops-agent` runs one scripted session.
+
+`tool` is the model-free path: `contract-ops-agent tool lint_contract
+'{"path":"agreement.md"}'` drives one CLI through the same MCP mount — same
+path confinement, same sign guard, and consequential tools still ask first.
 
 The contract-ops CLIs must be installed (the MCP server shells out to them);
 `doctor` and the first-run wizard tell you which are missing and can install them.
@@ -59,10 +67,13 @@ The model is a config choice (`model: "provider/model"` ref, wizard step 3):
 - **`openai/<model>`** (e.g. `openai/gpt-4o`) — runs the agent's own
   tool-calling loop against the OpenAI API. Auth is **`OPENAI_API_KEY`**, from
   your environment or stored (0600) by setup.
-- **Any OpenAI-compatible endpoint** — a `providers` entry in config (the
-  wizard's "other endpoint" path) with a `baseUrl`, key env var, and default
-  model makes `myendpoint/<model>` work with no new code. See
-  `docs/providers.md` for Gemini/Grok/Ollama/OpenRouter examples.
+- **Presets** — `gemini/<model>`, `grok/<model>`, `deepseek/<model>`,
+  `openrouter/<model>`, and `ollama/<model>` (local, no key needed) work with
+  zero config: base URL and key variable are built in, just add the key.
+- **Any other OpenAI-compatible endpoint** — a `providers` entry in config
+  (the wizard's "other endpoint" path) with a `baseUrl`, key env var, and
+  default model makes `myendpoint/<model>` work with no new code. See
+  `docs/providers.md`.
 
 The harness implements no login flow of its own and never handles your
 credentials beyond storing a key you paste (masked) into setup. A missing key

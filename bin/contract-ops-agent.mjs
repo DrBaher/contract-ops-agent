@@ -10,6 +10,7 @@ import { prepareModel, knownProviderIds } from "../src/providers/index.mjs";
 import { configState, configPath, applyAuth, configDir, migrateConfig } from "../src/config.mjs";
 import { runSetup } from "../src/setup.mjs";
 import { diagnose, renderDoctor, installPlan } from "../src/doctor.mjs";
+import { runTool } from "../src/passthrough.mjs";
 
 const argv = process.argv.slice(2);
 const sub = argv[0] && !argv[0].startsWith("-") ? argv[0] : null;
@@ -27,6 +28,7 @@ Usage:
   contract-ops-agent --resume [last|<transcript.jsonl>]      continue a prior conversation
   contract-ops-agent setup                                   (re)run the setup wizard
   contract-ops-agent doctor                                  check environment; offer to install what's missing
+  contract-ops-agent tool [<name> ['{json args}']]           list tools, or run one directly (no model)
 
 Auth: bring your own — a Claude API key or Claude Code login, an OpenAI key,
 or a key for any preset/compatible endpoint (see docs/providers.md).`);
@@ -59,6 +61,29 @@ function withAsker(fn) {
   return Promise.resolve(fn(ask, askSecret)).finally(() => { if (!rl.closed) rl.close(); });
 }
 const runInstall = (cmd) => execSync(cmd, { stdio: "inherit" });
+
+if (sub === "tool") {
+  // Positional args after `tool`, skipping --flag/value pairs.
+  const positional = [];
+  for (let i = 1; i < argv.length; i++) {
+    if (argv[i].startsWith("-")) { i++; continue; }
+    positional.push(argv[i]);
+  }
+  const name = positional[0] ?? null;
+  const jsonArg = positional[1] ?? null;
+  let args = {};
+  if (jsonArg) {
+    try { args = JSON.parse(jsonArg); } catch (e) { console.error(`arguments must be a JSON object: ${e.message}`); process.exit(2); }
+    if (!args || typeof args !== "object" || Array.isArray(args)) { console.error("arguments must be a JSON object"); process.exit(2); }
+  }
+  const toolCfg = configState().config ?? {};
+  const toolWorkspace = resolve(flag("--workspace") ?? toolCfg.workspace ?? process.cwd());
+  const code = await withAsker((ask) => runTool({
+    workspace: toolWorkspace, name, args,
+    confirm: async (_tool, _input, detail) => /^y(es)?$/i.test((await ask(`⚖ gate: ${detail}\n  approve? [y/N] `)).trim()),
+  }));
+  process.exit(code);
+}
 
 if (sub === "doctor") {
   const migrated = migrateConfig();

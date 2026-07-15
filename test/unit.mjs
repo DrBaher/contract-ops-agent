@@ -453,3 +453,54 @@ test("P6: prepareModel — resolves, loads stored keys, enforces the key preflig
     for (const id of ["claude", "openai", "gemini", "ollama", "myllm"]) assert.ok(known.includes(id), id);
   } finally { rm(dir, { recursive: true, force: true }); }
 });
+
+// --- v0.4 M5: direct-CLI passthrough ---
+test("T1: runTool — list, unknown tool, read-only runs ungated, consequential gates", async () => {
+  const { runTool } = await import("../src/passthrough.mjs");
+  const calls = [];
+  const fakeMcp = {
+    tools: [
+      { name: "lint_contract", description: "Lint a contract\nmore" },
+      { name: "fill_template", description: "Fill a template" },
+    ],
+    call: async (name, args) => { calls.push({ name, args }); return { content: [{ type: "text", text: `${name} ran` }] }; },
+    close: async () => {},
+  };
+  const _connect = async () => fakeMcp;
+  const lines = [];
+  const out = (s) => lines.push(s);
+  const confirms = [];
+
+  // list
+  assert.equal(await runTool({ workspace: "/w", name: null, out, _connect }), 0);
+  assert.ok(lines.join("\n").includes("lint_contract"));
+
+  // unknown
+  assert.equal(await runTool({ workspace: "/w", name: "nope", out, _connect }), 2);
+
+  // read-only: no confirmation asked
+  const code = await runTool({
+    workspace: "/w", name: "lint_contract", args: { path: "a.md" }, out, _connect,
+    confirm: async (...a) => { confirms.push(a); return true; },
+  });
+  assert.equal(code, 0);
+  assert.deepEqual(confirms, [], "read-only tool must not prompt");
+  assert.deepEqual(calls.at(-1), { name: "lint_contract", args: { path: "a.md" } });
+
+  // consequential: declined → never called
+  const before = calls.length;
+  const code2 = await runTool({
+    workspace: "/w", name: "fill_template", args: { template: "t.md" }, out, _connect,
+    confirm: async () => false,
+  });
+  assert.equal(code2, 2);
+  assert.equal(calls.length, before, "declined tool must not execute");
+
+  // consequential: approved → runs
+  const code3 = await runTool({
+    workspace: "/w", name: "fill_template", args: { template: "t.md" }, out, _connect,
+    confirm: async () => true,
+  });
+  assert.equal(code3, 0);
+  assert.equal(calls.at(-1).name, "fill_template");
+});
