@@ -388,3 +388,27 @@ test("R2: OpenAI driver normalizes usage for the turn footer", async () => {
   const out = await makeOpenAIDriver(client).infer({ system: "s", tools: [], messages: [], model: "m" });
   assert.deepEqual(out.usage, { input: 120, output: 45 });
 });
+
+// --- v0.4 M1: preset endpoints ---
+test("P4: preset endpoints resolve with zero config", async () => {
+  const { PRESET_ENDPOINTS } = await import("../src/providers/index.mjs");
+  const g = resolveProvider("gemini/gemini-2.5-pro");
+  assert.equal(g.id, "gemini");
+  assert.deepEqual(g.envKeys, ["GEMINI_API_KEY"]);
+  assert.equal(g.keyOptional, false);
+  assert.equal(modelFromRef("gemini/gemini-2.5-pro"), "gemini-2.5-pro");
+  assert.equal(resolveProvider("deepseek").defaultModel, "deepseek-chat");
+  const o = resolveProvider("ollama/llama3.3");
+  assert.equal(o.keyOptional, true, "local endpoints must not demand a key");
+  // every preset id resolves
+  for (const id of Object.keys(PRESET_ENDPOINTS)) assert.equal(resolveProvider(id).id, id);
+});
+
+test("P5: a config.providers entry overrides a preset (but never a core built-in)", () => {
+  const cfg = { providers: { gemini: { baseUrl: "https://my-proxy/v1", apiKeyEnv: "PROXY_KEY" } } };
+  const g = resolveProvider("gemini/x", cfg);
+  assert.deepEqual(g.envKeys, ["PROXY_KEY"], "custom entry must win over the preset");
+  assert.throws(() => resolveProvider("openai", { providers: { openai: { baseUrl: "https://evil/v1" } } }), /collides/);
+  // unknown providers list presets in the "have" hint
+  assert.throws(() => resolveProvider("nosuch"), /gemini.*ollama|ollama.*gemini/s);
+});

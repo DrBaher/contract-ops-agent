@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
 import { saveConfig, saveApiKey } from "./config.mjs";
 import { diagnose, installPlan } from "./doctor.mjs";
-import { RESERVED_PROVIDER_IDS } from "./providers/index.mjs";
+import { RESERVED_PROVIDER_IDS, PRESET_ENDPOINTS } from "./providers/index.mjs";
 
 const yes = (s, dflt = true) => {
   const t = String(s ?? "").trim();
@@ -83,12 +83,31 @@ export async function runSetup({ ask, askSecret = ask, env = process.env, cwd = 
   const pChoice = (await ask(
     "  1) Anthropic Claude — a Claude API key, or your existing Claude Code subscription\n" +
     "  2) OpenAI (GPT)     — your OpenAI API key\n" +
-    "  3) Other endpoint   — any OpenAI-compatible API (Gemini, Grok, DeepSeek, Ollama, a local server…)\n" +
-    "  Choose [1/2/3]: ",
+    "  3) Gemini / Grok / DeepSeek / OpenRouter / Ollama — built-in endpoints, just add a key\n" +
+    "  4) Other endpoint   — any other OpenAI-compatible API (a proxy, a local server…)\n" +
+    "  Choose [1/2/3/4]: ",
   )).trim();
 
   let model, auth, providers;
   if (pChoice === "3") {
+    // A preset endpoint — the base URL and key variable are built in.
+    let name = (await ask(`  Which one? [${Object.keys(PRESET_ENDPOINTS).join("/")}]: `)).trim().toLowerCase();
+    if (!PRESET_ENDPOINTS[name]) {
+      out(`  "${name}" isn't a preset — using gemini. (Presets: ${Object.keys(PRESET_ENDPOINTS).join(", ")}; anything else via option 4.)`);
+      name = "gemini";
+    }
+    const preset = PRESET_ENDPOINTS[name];
+    const envKey = preset.apiKeyEnv;
+    if (env[envKey] && yes(await ask(`  Found ${envKey} in your environment — use it? [Y/n] `))) {
+      auth = { mode: "env", envKey };
+    } else {
+      const key = (await askSecret(`  API key for ${name} (${preset.keyOptional ? "blank if it needs none" : `stored as ${envKey}`}): `)).trim();
+      if (key) { auth = { mode: "api-key", envKey }; saveApiKey(envKey, key, env); out("  Saved (chmod 600)."); }
+      else { auth = { mode: "env", envKey }; if (!preset.keyOptional) out(`  No key entered — it'll read ${envKey} from your environment.`); }
+    }
+    const m = (await ask(`  Model${preset.defaultModel ? ` [${preset.defaultModel}]` : ""}: `)).trim() || preset.defaultModel || "default";
+    model = `${name}/${m}`;
+  } else if (pChoice === "4") {
     // Any OpenAI-compatible endpoint — reaches the long tail with one adapter.
     out("  Base-URL examples:");
     out("    Gemini:  https://generativelanguage.googleapis.com/v1beta/openai/");

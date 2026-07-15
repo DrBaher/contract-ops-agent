@@ -89,14 +89,17 @@ export function makeOpenAIDriver(client) {
 // non-OpenAI endpoint (Gemini/Grok/DeepSeek/Ollama/OpenRouter/… all expose an
 // OpenAI-shaped API), and `apiKeyEnv` names the env var holding its key. With no
 // baseURL it's plain OpenAI. The enclosure is identical — it's the same loop.
-export function makeOpenAIProvider({ id = "openai", apiKeyEnv = "OPENAI_API_KEY", baseURL, defaultModel = "gpt-4o" } = {}) {
+export function makeOpenAIProvider({ id = "openai", apiKeyEnv = "OPENAI_API_KEY", baseURL, defaultModel = "gpt-4o", keyOptional = false } = {}) {
   return {
     id,
     envKeys: [apiKeyEnv],
+    keyOptional, // local endpoints (Ollama…) run without a key
     defaultModel,
     startSession({ workspace, systemPrompt, model, canUseTool, maxTurns }) {
       const client = new OpenAI({
-        apiKey: process.env[apiKeyEnv],
+        // The SDK refuses an absent key even where the endpoint doesn't need
+        // one — send a placeholder for key-optional (local) endpoints.
+        apiKey: process.env[apiKeyEnv] ?? (keyOptional ? "none" : undefined),
         ...(baseURL ? { baseURL } : {}),
       });
       const driver = makeOpenAIDriver(client);

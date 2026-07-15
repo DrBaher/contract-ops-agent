@@ -30,7 +30,30 @@ Your own OpenAI key (`OPENAI_API_KEY`). Runs on the raw tool-calling loop.
 { "model": "openai/gpt-4o", "auth": { "mode": "api-key", "envKey": "OPENAI_API_KEY" } }
 ```
 
-## Any OpenAI-compatible endpoint (Gemini, Grok, DeepSeek, Ollama, local, routers…)
+## Preset endpoints — Gemini, Grok, DeepSeek, OpenRouter, Ollama
+
+These need **zero config**: the base URL and key variable are built in, so a
+`provider/model` ref just works once the key is present (wizard option 3, or
+set the env var):
+
+| Ref | Key env var | Default model |
+|---|---|---|
+| `gemini/<model>` | `GEMINI_API_KEY` | `gemini-2.5-flash` |
+| `grok/<model>` | `XAI_API_KEY` | `grok-3` |
+| `deepseek/<model>` | `DEEPSEEK_API_KEY` | `deepseek-chat` |
+| `openrouter/<model>` | `OPENROUTER_API_KEY` | — (always name one) |
+| `ollama/<model>` (local) | `OLLAMA_API_KEY` (optional) | — (always name one) |
+
+```json5
+{ "model": "gemini/gemini-2.5-flash", "auth": { "mode": "api-key", "envKey": "GEMINI_API_KEY" } }
+{ "model": "ollama/llama3.3", "auth": { "mode": "env", "envKey": "OLLAMA_API_KEY" } } // no key needed
+```
+
+A `providers` entry with the same name **overrides** a preset (point `gemini`
+at a proxy, `ollama` at another host…). Only `claude` and `openai` can't be
+shadowed.
+
+## Any other OpenAI-compatible endpoint (proxies, local servers, routers…)
 
 Most model vendors and local servers expose an OpenAI-shaped API, so a single
 adapter reaches all of them. Add a `providers` entry (base URL + which env var
@@ -38,27 +61,17 @@ holds its key) and reference it as `<name>/<model>`:
 
 ```json5
 {
-  "model": "gemini/gemini-2.0-flash",
-  "auth": { "mode": "api-key", "envKey": "GEMINI_API_KEY" },
+  "model": "myproxy/some-model",
+  "auth": { "mode": "api-key", "envKey": "MYPROXY_API_KEY" },
   "providers": {
-    "gemini": { "baseUrl": "https://generativelanguage.googleapis.com/v1beta/openai/", "apiKeyEnv": "GEMINI_API_KEY" }
+    "myproxy": { "baseUrl": "https://my-gateway.example/v1", "apiKeyEnv": "MYPROXY_API_KEY" }
   }
 }
 ```
 
-Common base URLs:
-
-| Endpoint | Base URL |
-|---|---|
-| Google Gemini | `https://generativelanguage.googleapis.com/v1beta/openai/` |
-| xAI Grok | `https://api.x.ai/v1` |
-| DeepSeek | `https://api.deepseek.com/v1` |
-| OpenRouter | `https://openrouter.ai/api/v1` |
-| Ollama (local) | `http://localhost:11434/v1` |
-
-The wizard's **"3) Other endpoint"** option writes this block for you (name →
+The wizard's **"4) Other endpoint"** option writes this block for you (name →
 base URL → key → model). A local endpoint that needs no key: leave the key
-blank.
+blank (add `"keyOptional": true` to skip the startup key check).
 
 ## What's the same on every provider
 

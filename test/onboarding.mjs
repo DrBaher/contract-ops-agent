@@ -186,7 +186,7 @@ test("S6: setup wizard — OpenAI-compatible endpoint records a providers block 
   const { env, dir } = tmpEnv();
   try {
     // workspace, provider→3(endpoint), name, baseUrl, key, model
-    const ask = scriptAsk(["", "3", "grok", "https://api.x.ai/v1", "sk-grok", "grok-2"]);
+    const ask = scriptAsk(["", "4", "grok", "https://api.x.ai/v1", "sk-grok", "grok-2"]);
     const cfg = await runSetup({ ask, env, cwd: "/c", checkBin: async () => true });
     assert.equal(cfg.model, "grok/grok-2");
     assert.deepEqual(cfg.providers.grok, { baseUrl: "https://api.x.ai/v1", apiKeyEnv: "GROK_API_KEY" });
@@ -200,7 +200,7 @@ test("S6: setup wizard — OpenAI-compatible endpoint records a providers block 
 test("S7: endpoint name that collides with a built-in is suffixed (no wrong-host routing)", async () => {
   const { env, dir } = tmpEnv();
   try {
-    const ask = scriptAsk(["", "3", "openai", "https://my-gateway/v1", "sk-gw", "some-model"]);
+    const ask = scriptAsk(["", "4", "openai", "https://my-gateway/v1", "sk-gw", "some-model"]);
     const cfg = await runSetup({ ask, env, cwd: "/c", checkBin: async () => true });
     assert.equal(cfg.model, "openai-endpoint/some-model", "reserved name must be renamed, not left as 'openai'");
     assert.ok(cfg.providers["openai-endpoint"], "endpoint stored under the suffixed name");
@@ -213,7 +213,7 @@ test("S7: endpoint name that collides with a built-in is suffixed (no wrong-host
 test("S8: degenerate endpoint name falls back to 'custom'", async () => {
   const { env, dir } = tmpEnv();
   try {
-    const ask = scriptAsk(["", "3", "@#$", "https://x/v1", "", "m"]); // junk name, blank key → env mode
+    const ask = scriptAsk(["", "4", "@#$", "https://x/v1", "", "m"]); // junk name, blank key → env mode
     const cfg = await runSetup({ ask, env, cwd: "/c", checkBin: async () => true });
     assert.equal(cfg.model, "custom/m");
     assert.ok(cfg.providers.custom);
@@ -278,5 +278,19 @@ test("M1: migrateConfig upgrades a v1 config + legacy credentials once", async (
     // Idempotent: a second run does nothing.
     const r2 = migrateConfig(env);
     assert.deepEqual(r2.actions, []);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("S8: wizard preset path — gemini with a pasted key, no providers block", async () => {
+  const { resolveProvider } = await import("../src/providers/index.mjs");
+  const { env, dir } = tmpEnv();
+  try {
+    const ask = scriptAsk(["", "3", "gemini", "sk-gem", ""]); // workspace, presets, which, key, model→default
+    const cfg = await runSetup({ ask, env, cwd: "/w", checkBin: async () => true, runInstall: () => {}, out: () => {} });
+    assert.equal(cfg.model, "gemini/gemini-2.5-flash");
+    assert.deepEqual(cfg.auth, { mode: "api-key", envKey: "GEMINI_API_KEY" });
+    assert.equal(cfg.providers, undefined, "presets need no providers block");
+    assert.equal(loadApiKey("GEMINI_API_KEY", env), "sk-gem");
+    assert.equal(resolveProvider(cfg.model, cfg).id, "gemini");
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

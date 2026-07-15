@@ -109,9 +109,10 @@ try {
 const model = flag("--model") ?? modelFromRef(cfg.model);
 
 // Preflight auth: a non-Claude provider strictly needs its key in the env (the
-// Claude path may instead ride a Claude Code login, so it gets no hard check).
+// Claude path may instead ride a Claude Code login, and key-optional local
+// endpoints run without one, so those get no hard check).
 // Better a clear message now than a raw SDK crash on the first turn.
-if (provider.id !== "claude" && !provider.envKeys.some((k) => process.env[k])) {
+if (provider.id !== "claude" && !provider.keyOptional && !provider.envKeys.some((k) => process.env[k])) {
   console.error(`No API key found for provider "${provider.id}" — expected ${provider.envKeys.join(" or ")} in your environment or stored by setup.\nRun \`contract-ops-agent setup\` to configure auth.`);
   process.exit(1);
 }
