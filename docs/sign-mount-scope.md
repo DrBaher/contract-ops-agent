@@ -16,9 +16,9 @@ matter which option is chosen.
 
 ## What holds today (the baseline being traded against)
 
-1. The agent's only tools are contract-ops MCP tools; sign-cli is reachable
-   **read-only** through three curated tools (`verify_signature`,
-   `verify_receipt`, `audit_show`).
+1. With signing off (the default), the agent's only tools are contract-ops
+   MCP tools; sign-related needs are covered read-only by the curated
+   `verify_signature` / `verify_receipt` / `audit_show` tools.
 2. The `run` escape hatch **refuses signing-mutation commands** server-side
    (create/send/approve/sign/…) — hardened in contract-ops-mcp v0.1.3/0.1.7.
 3. The startup assertion fails the session if any non-contract-ops tool is
@@ -89,16 +89,13 @@ in, and `contract-ops-agent tool` gains no signing power. The human runs one
 pasted line; the agent picks up afterwards with `verify_*`/vault tracking.
 ~80% of the friction removed, zero change to the security posture.
 
-## Recommendation
+## Recommendation at the time (kept for the record)
 
-**D now; C only if D proves insufficient in real use.** B is a different
-product and I'd decline it. If C is approved, it lands in contract-ops-mcp
-(the server owns the tool + guard) with the harness changes above, its own
-adversarial review pass before release, and live tests that prove the
-assertion still fails on any second sign tool.
-
-## Decision needed from you
-
-1. Is D's copy-paste handoff enough, or do you want C's in-agent send?
-2. If C: does the typed-recipient gate feel right, or should send also require
-   a second factor (e.g. a code sign-cli prints out-of-band)?
+The original recommendation was **D now; C only if D proves insufficient**,
+declining B. The decision went the other way: ship B *and* C as
+user-selectable modes, with C adapted to sign-cli's real MCP surface (no
+create/send tools exist there, so the middle mode became tracking + PDF
+preparation) and B hardened beyond the original sketch (server-side `--tool`
+whitelist on every mode, typed-consent gate on each signing act, double
+opt-in, per-mode prompt honesty). See the header for what shipped; the threat
+analysis above still governs any future widening.

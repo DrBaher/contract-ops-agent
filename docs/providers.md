@@ -100,7 +100,10 @@ The enclosure. Whichever model drives it:
   file access, no web (there are no other tools to call);
 - consequential actions (`fill_template`, `convert_to_pdf`, the `run` escape
   hatch) require your approval at the gate;
-- **signing is unreachable** — the agent hands off to the human sign-cli flow.
+- **signing is unreachable by default** — the agent hands off to the human
+  sign-cli flow. The opt-in signing modes (`signing.mode` config +
+  `--enable-signing`; see the README's Signing section and
+  `docs/sign-mount-scope.md`) apply identically on every provider.
 
 Subscription login is the one exception that's Claude-only (the raw Messages API
 supports keys, not the consumer subscription); every other provider is

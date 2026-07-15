@@ -23,7 +23,7 @@ One-time wizard, persisted config, then you live in it. Re-runnable, never block
 ## 2. Config
 
 - **Location:** `$XDG_CONFIG_HOME/contract-ops-agent/` (fallback `~/.config/contract-ops-agent/`).
-- **`config.json`** (non-secret): `{ version, workspace, auth: { mode }, model? }`.
+- **`config.json`** (non-secret): `{ version, workspace, model?, auth: { mode, envKey? }, providers?, fallbacks?, signing? }` — see docs/providers.md for the providers/fallbacks blocks and the README's Signing section for `signing`.
 - **`credentials.json`** (secret, chmod `0600`, separate file): `{ anthropic_api_key }` — only when the user chooses the stored-API-key mode. Never written to `config.json`, never to a transcript.
 - **First-run detection:** `config.json` absent ⇒ run the wizard before the REPL.
 

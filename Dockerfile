@@ -10,6 +10,11 @@
 # Subcommands work the same way: `… contract-ops-agent doctor`, `… tool lint_contract '{…}'`.
 FROM node:22-slim
 
+LABEL org.opencontainers.image.source="https://github.com/DrBaher/contract-ops-agent" \
+      org.opencontainers.image.description="Contract work in an enclosure — the agent, the full contract-ops CLI suite, and a PDF backend, bundled. Bring only a model key." \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.title="contract-ops-agent"
+
 # Python CLIs (pipx-isolated), and LibreOffice headless as the convert_to_pdf
 # backend. One layer, caches purged.
 RUN apt-get update \

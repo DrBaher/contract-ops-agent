@@ -12,4 +12,4 @@ jobs:
         with:
           node-version: '22'
       - run: npm install --no-audit --no-fund
-      - run: npm test   # offline suite (unit + onboarding); live tests need the CLIs + an API key
+      - run: npm test   # offline suite (unit, onboarding, resilience, fallback, signing); live tests need the CLIs + an API key

@@ -2,8 +2,9 @@
 
 ## CI
 
-`.github/workflows/ci.yml` runs the offline test suite (`npm test` → unit +
-onboarding, 27 tests) on every push to `main` and every PR. The live suites
+`.github/workflows/ci.yml` runs the offline test suite (`npm test` → unit,
+onboarding, resilience, repl-fallback, signing) on every push to `main` and
+every PR. The live suites
 (`npm run test:live`, and `npm run test:live:openai` for the OpenAI provider)
 are **not** run in CI — they need the contract-ops CLIs installed plus an
 Anthropic API key / `OPENAI_API_KEY` respectively. Run them locally before a
