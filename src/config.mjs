@@ -58,10 +58,8 @@ function readCreds(env) {
   }
 }
 
-export function saveApiKey(envKey, key, env = process.env) {
+function writeCreds(creds, env) {
   mkdirSync(configDir(env), { recursive: true });
-  const creds = readCreds(env);
-  creds[envKey] = key;
   const p = credentialsPath(env);
   writeFileSync(p, JSON.stringify(creds) + "\n", { mode: 0o600 });
   try {
@@ -71,6 +69,39 @@ export function saveApiKey(envKey, key, env = process.env) {
     // secret readable by others — surface it rather than swallow it.
     process.stderr.write(`[contract-ops-agent] warning: could not set 0600 permissions on ${p} (${e.message}); the stored key may be readable by others.\n`);
   }
+}
+
+export function saveApiKey(envKey, key, env = process.env) {
+  const creds = readCreds(env);
+  creds[envKey] = key;
+  writeCreds(creds, env);
+}
+
+// One-shot v1→v2 migration, run by `doctor` (per the provider scope: migrations
+// live in doctor, not in runtime shims — the loadApiKey/applyAuth fallbacks
+// remain only as a safety net for configs that never see a doctor run).
+// Returns the list of actions taken (empty when already current).
+export function migrateConfig(env = process.env) {
+  const actions = [];
+  const st = configState(env);
+  if (st.status !== "ok") return { status: st.status, actions };
+  const cfg = st.config;
+  if ((cfg.version ?? 1) < CONFIG_VERSION) {
+    if (cfg.auth?.mode === "api-key" && !cfg.auth.envKey) {
+      cfg.auth.envKey = "ANTHROPIC_API_KEY";
+      actions.push("auth.envKey: set to ANTHROPIC_API_KEY (v1 implied it)");
+    }
+    saveConfig(cfg, env); // rewrites with version: CONFIG_VERSION
+    actions.push(`config version: ${cfg.version ?? 1} → ${CONFIG_VERSION}`);
+  }
+  const creds = readCreds(env);
+  if (creds[LEGACY_ANTHROPIC]) {
+    if (!creds.ANTHROPIC_API_KEY) creds.ANTHROPIC_API_KEY = creds[LEGACY_ANTHROPIC];
+    delete creds[LEGACY_ANTHROPIC];
+    writeCreds(creds, env);
+    actions.push("credentials: anthropic_api_key → ANTHROPIC_API_KEY");
+  }
+  return { status: "ok", actions };
 }
 
 export function loadApiKey(envKey = "ANTHROPIC_API_KEY", env = process.env) {

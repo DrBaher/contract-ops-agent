@@ -1,6 +1,6 @@
 # contract-ops-agent — Provider Abstraction ("Bring Your Own Model") Scope
 
-**Status:** Draft for approval · 2026-07-14
+**Status:** Shipped as v0.3.0 (2026-07-15) — Claude + OpenAI + compatible endpoints, hand-rolled loop (§11 decisions: 1 → Claude+OpenAI first, Gemini-native deferred; 2 → build, not framework; 3 → M1 first). Live-verified on both backends.
 **Goal:** Make the agent **provider-agnostic** — run the same enclosed contract workflow on Claude, OpenAI (GPT), Google (Gemini), or any OpenAI-compatible endpoint — **without weakening the enclosure**. Modeled on OpenClaw's architecture (thin generic loop + provider plugins that own auth/catalog/transport), but with a hard invariant OpenClaw does not have: the enclosure holds identically on every backend.
 
 ## 1. The one distinction that governs the whole design

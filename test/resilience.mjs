@@ -197,6 +197,39 @@ test("turn_end meta accumulates usage across a multi-call turn", async () => {
   assert.deepEqual(end.meta.usage, { input: 250, output: 50 });
 });
 
+test("openai compactHistory trims old messages at a user-message boundary", () => {
+  const driver = makeOpenAIDriver(null);
+  // 130 messages: repeated [user, assistant(tool_calls), tool, assistant] blocks.
+  const messages = [];
+  while (messages.length < 130) {
+    messages.push({ role: "user", content: `u${messages.length}` });
+    messages.push({ role: "assistant", content: "", tool_calls: [{ id: `t${messages.length}` }] });
+    messages.push({ role: "tool", tool_call_id: `t${messages.length - 1}`, content: "r" });
+    messages.push({ role: "assistant", content: "done" });
+  }
+  const before = messages.length;
+  const dropped = driver.compactHistory(messages);
+  assert.ok(dropped > 0);
+  assert.equal(messages.length, before - dropped);
+  assert.ok(messages.length <= 80 + 3, `still ${messages.length} messages`);
+  assert.equal(messages[0].role, "user", "compacted history must resume at a user message");
+  // Under the threshold nothing is touched.
+  const small = [{ role: "user", content: "hi" }];
+  assert.equal(driver.compactHistory(small), 0);
+  assert.equal(small.length, 1);
+});
+
+test("the loop announces context trimming via a notice", async () => {
+  const driver = scriptedDriver([{ text: "ok" }]);
+  driver.compactHistory = () => 7;
+  const session = startSession(driver);
+  const events = [];
+  session.send("go");
+  await drainTurn(session.events(), events);
+  session.end();
+  assert.ok(events.some((e) => e.type === "notice" && /context trimmed.*7 oldest/.test(e.text)));
+});
+
 test("openai repairHistory strips dangling tool_calls after an abnormal turn", () => {
   const driver = makeOpenAIDriver(/* client */ null);
   const messages = [

@@ -70,6 +70,18 @@ export function makeOpenAIDriver(client) {
         messages[messages.length - 1] = { ...last, tool_calls: undefined };
       }
     },
+    // Called by the loop before each turn. A long session otherwise grows
+    // without bound and eventually blows the model's context window (which
+    // would surface as a per-turn inference error). Drop the oldest messages,
+    // never splitting a tool_calls/tool-result pair: history must resume at a
+    // user message. Returns how many messages were dropped.
+    compactHistory(messages, { compactAt = 120, compactTo = 80 } = {}) {
+      if (messages.length <= compactAt) return 0;
+      let cut = messages.length - compactTo;
+      while (cut < messages.length && messages[cut].role !== "user") cut++;
+      messages.splice(0, cut);
+      return cut;
+    },
   };
 }
 

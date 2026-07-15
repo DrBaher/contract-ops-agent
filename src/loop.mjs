@@ -88,6 +88,10 @@ export function startLoopSession({ workspace, systemPrompt, model, canUseTool, d
 
         for await (const userText of inbox) {
           driver.pushUser(messages, userText);
+          if (driver.compactHistory) {
+            const dropped = driver.compactHistory(messages);
+            if (dropped > 0) yield { type: "notice", text: `context trimmed: dropped the ${dropped} oldest messages to stay within the model's window` };
+          }
           const ctl = new AbortController(); // scoped to THIS turn only
           turnAbort = ctl;
           let iterations = 0;

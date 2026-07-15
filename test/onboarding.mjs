@@ -221,3 +221,62 @@ test("S8: degenerate endpoint name falls back to 'custom'", async () => {
     assert.equal(cfg.auth.envKey, "CUSTOM_API_KEY");
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+// --- Tier-3: provider-aware doctor + doctor-owned v1→v2 migration ---
+test("D2: doctor checks the CONFIGURED provider's key, not just Anthropic's", async () => {
+  const { env, dir } = tmpEnv();
+  try {
+    saveConfig({ workspace: "/tmp", model: "openai/gpt-4o", auth: { mode: "env" } }, env);
+    const checkBin = async () => true;
+    const clis = { a: { bin: "abin", install: "npm i -g a" } };
+
+    const withKey = await diagnose({ clis, checkBin, env: { ...env, OPENAI_API_KEY: "sk-x" } });
+    assert.deepEqual(withKey.auth.keyEnvVars, ["OPENAI_API_KEY"]);
+    assert.deepEqual(withKey.auth.keyInEnv, ["OPENAI_API_KEY"]);
+    assert.match(renderDoctor(withKey), /OPENAI_API_KEY present in env/);
+
+    const noKey = await diagnose({ clis, checkBin, env: { ...env } });
+    assert.deepEqual(noKey.auth.keyInEnv, []);
+    assert.match(renderDoctor(noKey), /NOT configured — no OPENAI_API_KEY/);
+
+    // A stored (setup-saved) key counts even when the env var is absent.
+    saveApiKey("OPENAI_API_KEY", "sk-stored", env);
+    const stored = await diagnose({ clis, checkBin, env: { ...env } });
+    assert.deepEqual(stored.auth.keyStored, ["OPENAI_API_KEY"]);
+    assert.match(renderDoctor(stored), /OPENAI_API_KEY stored by setup/);
+
+    // An invalid provider is reported instead of a misleading auth line.
+    saveConfig({ model: "nosuch/model" }, env);
+    const bad = await diagnose({ clis, checkBin, env: { ...env } });
+    assert.ok(bad.providerError);
+    assert.match(renderDoctor(bad), /Provider: {4}INVALID/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("M1: migrateConfig upgrades a v1 config + legacy credentials once", async () => {
+  const { migrateConfig } = await import("../src/config.mjs");
+  const { env, dir } = tmpEnv();
+  try {
+    // Hand-write a v1 config (no version, api-key mode without envKey) and
+    // v1 credentials (legacy anthropic_api_key field).
+    const { mkdirSync, writeFileSync } = await import("node:fs");
+    mkdirSync(configDir(env), { recursive: true });
+    writeFileSync(configPath(env), JSON.stringify({ workspace: "/tmp", auth: { mode: "api-key" } }));
+    writeFileSync(credentialsPath(env), JSON.stringify({ anthropic_api_key: "sk-v1" }));
+
+    const r1 = migrateConfig(env);
+    assert.equal(r1.status, "ok");
+    assert.ok(r1.actions.length >= 2, r1.actions.join("; "));
+    const cfg = loadConfig(env);
+    assert.equal(cfg.version, CONFIG_VERSION);
+    assert.equal(cfg.auth.envKey, "ANTHROPIC_API_KEY");
+    const creds = JSON.parse(readFileSync(credentialsPath(env), "utf8"));
+    assert.equal(creds.ANTHROPIC_API_KEY, "sk-v1");
+    assert.equal(creds.anthropic_api_key, undefined);
+    assert.equal(loadApiKey("ANTHROPIC_API_KEY", env), "sk-v1");
+
+    // Idempotent: a second run does nothing.
+    const r2 = migrateConfig(env);
+    assert.deepEqual(r2.actions, []);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

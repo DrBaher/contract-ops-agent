@@ -104,5 +104,5 @@ Sources: Agent SDK quickstart & overview (code.claude.com/docs), help-center art
 ## 10. Open questions
 
 - **Repo:** new sibling repo (`contract-ops-agent`) vs a workspace inside this one. Leaning new repo — different release cadence, this repo stays a pure MCP server.
-- **Name:** `contract-ops-agent` vs `contract-ops-agent` vs something brandable under cli.drbaher.com.
+- **Name:** ~~`legal-harness` vs `contract-ops-agent` vs something brandable under cli.drbaher.com~~ — resolved: `contract-ops-agent` (published on npm).
 - **Transcript format:** plain markdown log vs structured JSONL (feeds a future audit story).

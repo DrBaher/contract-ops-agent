@@ -61,8 +61,10 @@ The single hard rule (OpenClaw's reinstatement came "with a catch"; the standing
 
 ## 7. Prerequisites (outside this build, block a real public launch)
 
-1. **Distribution:** the repo is `private: true`, unpublished, no git remote — nobody but the author can install it. Publish/push is a separate decision.
-2. **contract-ops-mcp `fill_template` fix must ship.** The harness depends on `contract-ops-mcp ^0.1.6`, which has the broken fill; the fix is staged in that repo, unpublished. A fresh install can extract/lint but can't author until a fixed version is published and the dependency bumped.
+Both resolved as of v0.2.1/v0.3.0:
+
+1. ~~**Distribution:** the repo is `private: true`, unpublished, no git remote~~ — published to npm (`contract-ops-agent`) via OIDC trusted publishing; repo at github.com/DrBaher/contract-ops-agent.
+2. ~~**contract-ops-mcp `fill_template` fix must ship.**~~ — shipped as `contract-ops-mcp` 0.1.7; the dependency is `^0.1.7`.
 
 ## 8. Modules & tests
 

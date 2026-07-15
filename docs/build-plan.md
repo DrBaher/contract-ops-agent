@@ -88,7 +88,7 @@ Out of scope (unchanged from scope doc): sign-cli MCP mounting (v1.1), npm publi
 
 ## 4a. Execution results (2026-07-13)
 
-All phases complete. v0.1.0 built and verified; not published.
+All phases complete. v0.1.0 built and verified. (Since superseded: v0.2 shipped onboarding, v0.3 shipped provider abstraction; the package is published on npm — see `releasing.md`.)
 
 - **P1–P3:** modules implemented; 18 unit tests + 7 live tests green.
 - **P4 adversarial review** (workflow: 4 finder lenses → per-finding skeptic verification, 22 agents): 11 findings confirmed, 7 dismissed. Fixed in this repo:

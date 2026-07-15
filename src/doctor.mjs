@@ -1,6 +1,7 @@
 import { CLIS } from "contract-ops-mcp/contract-ops-mcp.mjs";
 import { preflight, defaultCheckBin } from "./preflight.mjs";
-import { loadConfig } from "./config.mjs";
+import { loadConfig, loadApiKey } from "./config.mjs";
+import { resolveProvider } from "./providers/index.mjs";
 
 export const SUITE_INSTALLER = "curl -fsSL https://cli.drbaher.com/install.sh | sh";
 const PDF_BINS = ["soffice", "libreoffice"];
@@ -13,15 +14,25 @@ export async function diagnose({ clis = CLIS, checkBin = defaultCheckBin, env = 
   let pdfBackend = false;
   for (const b of PDF_BINS) if (await checkBin(b)) { pdfBackend = true; break; }
   const cfg = loadConfig(env);
+  // Auth is checked against the CONFIGURED provider's key vars, not a
+  // hardcoded ANTHROPIC_API_KEY — an openai/custom config needs its own key.
+  let provider = null;
+  let providerError = null;
+  try { provider = resolveProvider(cfg?.model, cfg); } catch (e) { providerError = e.message; }
+  const keyEnvVars = provider?.envKeys ?? [];
   return {
     cliRows,
     missing,
     pdfBackend,
     provider: cfg?.model ?? null,
+    providerId: provider?.id ?? null,
+    providerError,
     auth: {
       configured: cfg?.auth?.mode ?? null,
       envKey: cfg?.auth?.envKey ?? null,
-      apiKeyInEnv: !!env.ANTHROPIC_API_KEY,
+      keyEnvVars,
+      keyInEnv: keyEnvVars.filter((k) => !!env[k]),
+      keyStored: keyEnvVars.filter((k) => !!loadApiKey(k, env)),
       claudeCodeToken: !!env.CLAUDE_CODE_OAUTH_TOKEN,
     },
   };
@@ -41,11 +52,19 @@ export function renderDoctor(diag) {
   lines.push(`CLIs:        ${okCount}/${diag.cliRows.length} installed`);
   for (const m of diag.missing) lines.push(`  missing ${m.bin.padEnd(16)} install: ${m.install}`);
   lines.push(`PDF backend: ${diag.pdfBackend ? "present" : "MISSING (convert_to_pdf needs LibreOffice/soffice)"}`);
+  if (diag.providerError) {
+    lines.push(`Provider:    INVALID — ${diag.providerError}`);
+    lines.push(`Auth:        unknown (fix the provider first)`);
+    return lines.join("\n");
+  }
   lines.push(`Provider:    ${diag.provider ?? "not configured (defaults to claude)"}`);
   const a = diag.auth;
-  const authState = a.configured
-    ? `configured (${a.configured})`
-    : a.apiKeyInEnv ? "ANTHROPIC_API_KEY in env" : a.claudeCodeToken ? "Claude Code login" : "NOT configured — run `contract-ops-agent setup`";
+  let authState;
+  if (a.keyInEnv.length) authState = `${a.keyInEnv[0]} present in env`;
+  else if (a.keyStored.length) authState = `${a.keyStored[0]} stored by setup`;
+  else if (diag.providerId === "claude" && (a.configured === "claude-code" || a.claudeCodeToken)) authState = "Claude Code login";
+  else if (diag.providerId === "claude") authState = "no key found — the Agent SDK will try your Claude Code login (or run `contract-ops-agent setup`)";
+  else authState = `NOT configured — no ${a.keyEnvVars.join("/")} in env or stored; run \`contract-ops-agent setup\``;
   lines.push(`Auth:        ${authState}`);
   return lines.join("\n");
 }

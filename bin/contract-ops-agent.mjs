@@ -7,7 +7,7 @@ import { Transcript } from "../src/transcript.mjs";
 import { preflight, renderPreflight } from "../src/preflight.mjs";
 import { startRepl, makeAsker } from "../src/repl.mjs";
 import { resolveProvider, modelFromRef } from "../src/providers/index.mjs";
-import { configState, configPath, applyAuth, configDir } from "../src/config.mjs";
+import { configState, configPath, applyAuth, configDir, migrateConfig } from "../src/config.mjs";
 import { runSetup } from "../src/setup.mjs";
 import { diagnose, renderDoctor, installPlan } from "../src/doctor.mjs";
 
@@ -59,6 +59,8 @@ function withAsker(fn) {
 const runInstall = (cmd) => execSync(cmd, { stdio: "inherit" });
 
 if (sub === "doctor") {
+  const migrated = migrateConfig();
+  for (const a of migrated.actions) console.log(`[migrated] ${a}`);
   const diag = await diagnose();
   console.log(renderDoctor(diag));
   if (diag.missing.length) {
