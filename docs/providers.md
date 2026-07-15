@@ -73,6 +73,25 @@ The wizard's **"4) Other endpoint"** option writes this block for you (name →
 base URL → key → model). A local endpoint that needs no key: leave the key
 blank (add `"keyOptional": true` to skip the startup key check).
 
+## Fallback chains
+
+`fallbacks` in config lists refs to try, in order, when a turn ends in a
+terminal provider error (auth failure, model gone, endpoint down — transient
+errors already retry with backoff and never trigger fallback):
+
+```json5
+{
+  "model": "openai/gpt-4o",
+  "fallbacks": ["gemini/gemini-2.5-flash", "claude"]
+}
+```
+
+On failover the agent replays your unanswered message on the next viable ref
+and re-seeds the conversation so far (loop providers keep context; a fallback
+**to** `claude` starts contextless — the Agent SDK can't be seeded — and says
+so). Refs whose key is missing are skipped with a notice. Each ref is used at
+most once per session.
+
 ## What's the same on every provider
 
 The enclosure. Whichever model drives it:

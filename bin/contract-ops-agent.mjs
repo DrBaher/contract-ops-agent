@@ -172,4 +172,5 @@ await startRepl({
   systemPromptFor: buildSystemPrompt,
   prepare: (ref) => prepareModel(ref, cfg),
   knownProviders: knownProviderIds(cfg),
+  fallbacks: Array.isArray(cfg.fallbacks) ? cfg.fallbacks.filter((f) => typeof f === "string") : [],
 });

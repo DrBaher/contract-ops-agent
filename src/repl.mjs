@@ -114,7 +114,7 @@ function turnFooter(meta, toolCount) {
 // /model switching; a switch ends the session and starts a fresh one — context
 // resets, the enclosure is re-verified. `systemPromptFor(providerId)` supplies
 // the (possibly provider-specific) system prompt for each session.
-export async function startRepl({ provider, workspace, systemPromptFor, model, transcript, prepare = null, knownProviders = [], resume = null, input = process.stdin, output = process.stdout }) {
+export async function startRepl({ provider, workspace, systemPromptFor, model, transcript, prepare = null, knownProviders = [], resume = null, fallbacks = [], input = process.stdin, output = process.stdout }) {
   const rl = readline.createInterface({ input, output });
   const ask = makeAsker(rl);
   const spinner = makeSpinner(output);
@@ -190,6 +190,13 @@ export async function startRepl({ provider, workspace, systemPromptFor, model, t
   // the pending message for the new provider.
   let pending = r0.text;
   let resumeInfo = resume; // applied to the FIRST session only — a /model switch starts clean
+  // Fallback state: config.fallbacks refs are consumed left-to-right when a
+  // turn ends in a terminal provider error. seedLog mirrors the successful
+  // conversation (user/assistant text) so a fallback session can be re-seeded.
+  const fallbackQueue = [...fallbacks];
+  const seedLog = [];
+  let lastUser = null;
+  let turnTexts = [];
   try {
     while (pending !== null) {
       const session = cur.provider.startSession({
@@ -200,6 +207,8 @@ export async function startRepl({ provider, workspace, systemPromptFor, model, t
       activeSession = session;
       session.send(pending);
       transcript.write({ type: "user", text: pending });
+      lastUser = pending;
+      turnTexts = [];
       pending = null;
       spinner.start();
 
@@ -237,6 +246,7 @@ export async function startRepl({ provider, workspace, systemPromptFor, model, t
           if (ev.type === "text") {
             output.write(`\n${ev.text}\n`);
             transcript.write({ type: "assistant", text: ev.text });
+            turnTexts.push(ev.text);
             spinner.start();
           } else if (ev.type === "tool_use") {
             toolCount++;
@@ -249,11 +259,36 @@ export async function startRepl({ provider, workspace, systemPromptFor, model, t
             toolCount = 0;
             interrupted = false;
             transcript.write({ type: "result", ...ev.meta });
+            // A terminal provider failure triggers the fallback chain: switch
+            // to the next viable ref, re-seed the conversation so far, and
+            // replay the message the dead provider never answered.
+            if (ev.meta?.error && prepare) {
+              let fell = false;
+              while (fallbackQueue.length) {
+                const ref = fallbackQueue.shift();
+                try { cur = prepare(ref); fell = true; break; }
+                catch (e) { output.write(`[fallback ${ref} unavailable: ${e.message}]\n`); }
+              }
+              if (fell) {
+                const noCarry = cur.provider.id === "claude" ? "; prior context can't be carried to claude" : "";
+                output.write(`[falling back to ${refOf(cur)} — replaying your last message${noCarry}]\n`);
+                transcript.write({ type: "model", ref: refOf(cur), fallback: true });
+                resumeInfo = { seed: [...seedLog] };
+                pending = lastUser;
+                session.end();
+                break;
+              }
+            } else if (lastUser) {
+              // Only completed turns enter the fallback seed.
+              seedLog.push({ role: "user", text: lastUser }, ...turnTexts.map((t) => ({ role: "assistant", text: t })));
+            }
             const next = await promptUser("\ncontract-ops-agent> ");
             if (next === null) { session.end(); break; }
             if (next.switched) { pending = next.text; session.end(); break; } // restart on the new provider
             transcript.write({ type: "user", text: next.text });
             session.send(next.text);
+            lastUser = next.text;
+            turnTexts = [];
             spinner.start();
           }
         }
