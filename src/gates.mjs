@@ -1,7 +1,7 @@
 // canUseTool gate policy. `decide` is pure so tests never need a TTY; the
 // REPL supplies a readline prompter, tests supply a scripted one.
-import { normalize, dirname, basename } from "node:path";
-import { SIGN_PREFIX, SIGN_READS, SIGN_PREPARE_WRITES, SIGN_ACTS, allowedSignTools } from "./signing.mjs";
+import { normalize } from "node:path";
+import { SIGN_PREFIX, SIGN_READS, SIGN_ACTS, allowedSignTools } from "./signing.mjs";
 
 export const PREFIX = "mcp__contract-ops__";
 
