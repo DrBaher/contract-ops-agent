@@ -57,6 +57,15 @@ export function makeOpenAIDriver(client) {
         content: r.isError ? `ERROR: ${r.content}` : String(r.content ?? ""),
       }));
     },
+    // After an interrupted/failed turn the history may end with an assistant
+    // message whose tool_calls never got `role:"tool"` replies — the endpoint
+    // rejects the next request outright. Strip the dangling tool_calls.
+    repairHistory(messages) {
+      const last = messages[messages.length - 1];
+      if (last?.role === "assistant" && last.tool_calls) {
+        messages[messages.length - 1] = { ...last, tool_calls: undefined };
+      }
+    },
   };
 }
 

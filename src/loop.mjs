@@ -3,6 +3,42 @@ import { makeInputQueue } from "./async-queue.mjs";
 import { PREFIX } from "./gates.mjs";
 
 export const DEFAULT_MAX_TURNS = 100;
+export const DEFAULT_RETRY = { attempts: 3, baseMs: 1000 };
+
+// An interrupt (Ctrl-C) aborts the in-flight inference; the OpenAI SDK and
+// fetch both surface that as an abort-named rejection.
+export function isAbortError(e) {
+  return e?.name === "AbortError" || e?.name === "APIUserAbortError" || /\baborted?\b/i.test(String(e?.message ?? ""));
+}
+
+// Worth retrying: rate limits, server errors, request timeouts, and
+// connection-level failures (no HTTP status at all — DNS, resets, TLS).
+// Anything with a definite client-error status (401 bad key, 400 bad request,
+// 404 bad model) will fail identically on retry, so don't.
+export function isTransientError(e) {
+  const status = e?.status ?? e?.response?.status;
+  if (status === 429 || status === 408 || (status >= 500 && status < 600)) return true;
+  if (status) return false;
+  return (
+    e?.name === "APIConnectionError" ||
+    /ECONNRESET|ECONNREFUSED|ETIMEDOUT|EPIPE|EAI_AGAIN|fetch failed|network|socket/i.test(String(e?.message ?? "") + String(e?.code ?? ""))
+  );
+}
+
+export function describeError(e) {
+  const status = e?.status ?? e?.response?.status;
+  const msg = String(e?.message ?? e).slice(0, 300);
+  return status ? `HTTP ${status} — ${msg}` : msg;
+}
+
+function abortableSleep(ms, signal) {
+  return new Promise((resolve) => {
+    if (signal?.aborted) return resolve();
+    const t = setTimeout(done, ms);
+    function done() { clearTimeout(t); signal?.removeEventListener("abort", done); resolve(); }
+    signal?.addEventListener("abort", done, { once: true });
+  });
+}
 
 // The provider-agnostic tool-calling loop for non-Claude backends. We own the
 // loop, so the enclosure is a property of construction: the ONLY tools the model
@@ -11,11 +47,18 @@ export const DEFAULT_MAX_TURNS = 100;
 // no built-ins to strip. Every tool call passes the gate before execution, and
 // only allowed tools surface as a `tool_use` event.
 //
+// Failure contract: a provider or tool failure ends the TURN, never the session.
+// Transient inference errors (429/5xx/network) retry with backoff; anything
+// else surfaces as an `error` event followed by `turn_end` so the REPL can
+// prompt again with the conversation intact. Only enclosure setup failing is
+// terminal (an `error` event, then the generator returns).
+//
 // `driver` is the per-provider adapter (owns the inference dialect):
 //   pushUser(messages, text)                     append a user message (native shape)
 //   async infer({ system, tools, messages, model, signal }) -> { text, toolCalls: [{id,name,input}], assistantMessage }
 //   toolResultMessages(results: [{id, content, isError}]) -> native message(s) (array)
-export function startLoopSession({ workspace, systemPrompt, model, canUseTool, driver, maxTurns = DEFAULT_MAX_TURNS }) {
+//   repairHistory?(messages)                     make history valid after an abnormal turn end
+export function startLoopSession({ workspace, systemPrompt, model, canUseTool, driver, maxTurns = DEFAULT_MAX_TURNS, retry = DEFAULT_RETRY, _connect = connectMcp }) {
   const inbox = makeInputQueue();
   const messages = [];
   let turnAbort = null; // AbortController for the in-flight turn (interrupt target)
@@ -27,7 +70,12 @@ export function startLoopSession({ workspace, systemPrompt, model, canUseTool, d
     async *events() {
       let mcp = null;
       try {
-        mcp = await connectMcp(workspace);
+        try {
+          mcp = await _connect(workspace);
+        } catch (e) {
+          yield { type: "error", message: `could not start the contract-ops tool server: ${describeError(e)}` };
+          return;
+        }
         const rawByPrefixed = new Map();
         const exposed = mcp.tools.map((t) => {
           const name = PREFIX + t.name;
@@ -43,11 +91,35 @@ export function startLoopSession({ workspace, systemPrompt, model, canUseTool, d
           const ctl = new AbortController(); // scoped to THIS turn only
           turnAbort = ctl;
           let iterations = 0;
+          const meta = {};
           try {
-            for (;;) {
-              if (ctl.signal.aborted) break;
-              if (++iterations > maxTurns) break;
-              const { text, toolCalls, assistantMessage } = await driver.infer({ system: systemPrompt, tools: exposed, messages, model, signal: ctl.signal });
+            turn: for (;;) {
+              if (ctl.signal.aborted) { meta.interrupted = true; break; }
+              if (++iterations > maxTurns) {
+                meta.maxTurnsHit = true;
+                yield { type: "notice", text: `stopped after ${maxTurns} model calls (maxTurns) — the answer above may be incomplete` };
+                break;
+              }
+              let inferred;
+              for (let attempt = 1; ; attempt++) {
+                try {
+                  inferred = await driver.infer({ system: systemPrompt, tools: exposed, messages, model, signal: ctl.signal });
+                  break;
+                } catch (e) {
+                  if (ctl.signal.aborted || isAbortError(e)) { meta.interrupted = true; break turn; }
+                  if (attempt < retry.attempts && isTransientError(e)) {
+                    const delay = retry.baseMs * 2 ** (attempt - 1);
+                    yield { type: "notice", text: `provider error (${describeError(e)}) — retrying in ${Math.round(delay / 100) / 10}s (attempt ${attempt + 1}/${retry.attempts})` };
+                    await abortableSleep(delay, ctl.signal);
+                    if (ctl.signal.aborted) { meta.interrupted = true; break turn; }
+                    continue;
+                  }
+                  yield { type: "error", message: `inference failed: ${describeError(e)}` };
+                  meta.error = true;
+                  break turn;
+                }
+              }
+              const { text, toolCalls, assistantMessage } = inferred;
               if (assistantMessage) messages.push(assistantMessage);
               if (text) yield { type: "text", text };
               if (!toolCalls || toolCalls.length === 0) break;
@@ -58,8 +130,14 @@ export function startLoopSession({ workspace, systemPrompt, model, canUseTool, d
                   yield { type: "tool_use", name: call.name, input: call.input }; // only allowed → executed
                   const raw = rawByPrefixed.get(call.name);
                   if (!raw) { results.push({ id: call.id, content: `"${call.name}" is not a contract-ops tool`, isError: true }); continue; }
-                  const r = await mcp.call(raw, outcome.updatedInput ?? call.input);
-                  results.push({ id: call.id, content: mcpResultText(r), isError: r.isError === true });
+                  try {
+                    const r = await mcp.call(raw, outcome.updatedInput ?? call.input);
+                    results.push({ id: call.id, content: mcpResultText(r), isError: r.isError === true });
+                  } catch (e) {
+                    // A dead/crashed MCP subprocess fails the CALL, not the
+                    // session — the model sees the error and can tell the user.
+                    results.push({ id: call.id, content: `tool call failed: ${describeError(e)}`, isError: true });
+                  }
                 } else {
                   results.push({ id: call.id, content: outcome.message ?? "denied by the user", isError: true });
                 }
@@ -68,8 +146,11 @@ export function startLoopSession({ workspace, systemPrompt, model, canUseTool, d
             }
           } finally {
             turnAbort = null;
+            // An abnormal end can leave an assistant tool_calls message with no
+            // tool results — invalid history that would wedge the next request.
+            if ((meta.interrupted || meta.error) && driver.repairHistory) driver.repairHistory(messages);
           }
-          yield { type: "turn_end", meta: {} };
+          yield { type: "turn_end", meta };
         }
       } finally {
         await mcp?.close();

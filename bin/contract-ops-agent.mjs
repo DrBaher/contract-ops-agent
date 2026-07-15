@@ -7,7 +7,7 @@ import { Transcript } from "../src/transcript.mjs";
 import { preflight, renderPreflight } from "../src/preflight.mjs";
 import { startRepl, makeAsker } from "../src/repl.mjs";
 import { resolveProvider, modelFromRef } from "../src/providers/index.mjs";
-import { isFirstRun, loadConfig, applyAuth, configDir } from "../src/config.mjs";
+import { configState, configPath, applyAuth, configDir } from "../src/config.mjs";
 import { runSetup } from "../src/setup.mjs";
 import { diagnose, renderDoctor, installPlan } from "../src/doctor.mjs";
 
@@ -80,19 +80,39 @@ if (sub === "setup") {
 }
 
 // Default: start the agent. First run walks the wizard, then drops into the REPL.
-if (isFirstRun()) {
+// A corrupt config is NOT a first run — never overwrite the user's file.
+const cfgState = configState();
+if (cfgState.status === "corrupt") {
+  console.error(`Your config file has invalid JSON and can't be read:\n  ${configPath()}\n  (${cfgState.error})\nFix the JSON, or delete the file to start fresh with the setup wizard.`);
+  process.exit(1);
+}
+if (cfgState.status === "missing") {
   await withAsker((ask, askSecret) => runSetup({ ask, askSecret, runInstall, out: (m) => console.log(m) }));
   console.log("\nStarting…\n");
 }
 
-const cfg = loadConfig() ?? {};
+const cfg = (cfgState.status === "missing" ? configState().config : cfgState.config) ?? {};
 applyAuth(cfg);
 if (cfg.auth?.mode === "claude-code" && process.env.ANTHROPIC_API_KEY) {
   console.warn("note: ANTHROPIC_API_KEY is set in your environment — it overrides your Claude Code subscription (this bills the API, not your plan). Unset it to use the subscription.");
 }
 const workspace = resolve(flag("--workspace") ?? cfg.workspace ?? process.cwd());
-const provider = resolveProvider(cfg.model, cfg);       // cfg.model: "provider/model" ref or undefined → claude
+let provider;
+try {
+  provider = resolveProvider(cfg.model, cfg);           // cfg.model: "provider/model" ref or undefined → claude
+} catch (e) {
+  console.error(`${e.message}\nEdit ${configPath()} or re-run \`contract-ops-agent setup\`.`);
+  process.exit(1);
+}
 const model = flag("--model") ?? modelFromRef(cfg.model);
+
+// Preflight auth: a non-Claude provider strictly needs its key in the env (the
+// Claude path may instead ride a Claude Code login, so it gets no hard check).
+// Better a clear message now than a raw SDK crash on the first turn.
+if (provider.id !== "claude" && !provider.envKeys.some((k) => process.env[k])) {
+  console.error(`No API key found for provider "${provider.id}" — expected ${provider.envKeys.join(" or ")} in your environment or stored by setup.\nRun \`contract-ops-agent setup\` to configure auth.`);
+  process.exit(1);
+}
 
 const transcript = new Transcript(join(workspace, "transcripts"));
 

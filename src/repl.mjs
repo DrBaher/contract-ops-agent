@@ -80,33 +80,57 @@ export async function startRepl({ provider, workspace, systemPrompt, model, tran
   });
 
   let verified = false;
-  for await (const ev of session.events()) {
-    if (ev.type === "enclosure") {
-      const n = assertEnclosure({ tools: ev.tools });
-      verified = true;
-      output.write(`[enclosure verified: ${n} contract-ops tools, nothing else]\n`);
-      transcript.write({ type: "init", tools: ev.tools });
-      continue;
+  try {
+    for await (const ev of session.events()) {
+      // Harness-side diagnostics (retries, provider failures) are not model
+      // output — they may print before the enclosure is verified.
+      if (ev.type === "notice") {
+        output.write(`[${ev.text}]\n`);
+        transcript.write({ type: "notice", text: ev.text });
+        continue;
+      }
+      if (ev.type === "error") {
+        output.write(`\n[error] ${ev.message}\n`);
+        transcript.write({ type: "error", message: ev.message });
+        continue;
+      }
+      if (ev.type === "enclosure") {
+        const n = assertEnclosure({ tools: ev.tools });
+        verified = true;
+        output.write(`[enclosure verified: ${n} contract-ops tools, nothing else]\n`);
+        transcript.write({ type: "init", tools: ev.tools });
+        continue;
+      }
+      // Fail closed: no model output before the enclosure is verified.
+      if (!verified) {
+        throw new Error("Enclosure not verified before model activity — refusing to continue.");
+      }
+      if (ev.type === "text") {
+        output.write(`\n${ev.text}\n`);
+        transcript.write({ type: "assistant", text: ev.text });
+      } else if (ev.type === "tool_use") {
+        output.write(`  ⚙ ${ev.name} ${JSON.stringify(ev.input)}\n`);
+        transcript.write({ type: "tool_use", tool: ev.name, input: ev.input });
+      } else if (ev.type === "turn_end") {
+        if (ev.meta?.interrupted) output.write(`[turn interrupted]\n`);
+        interrupted = false;
+        transcript.write({ type: "result", ...ev.meta });
+        const r = await ask("\ncontract-ops-agent> ");
+        const next = r.closed ? null : r.answer?.trim();
+        if (!next || next === "/quit") { session.end(); break; }
+        transcript.write({ type: "user", text: next });
+        session.send(next);
+      }
     }
-    // Fail closed: no model output before the enclosure is verified.
-    if (!verified) {
-      throw new Error("Enclosure not verified before model activity — refusing to continue.");
-    }
-    if (ev.type === "text") {
-      output.write(`\n${ev.text}\n`);
-      transcript.write({ type: "assistant", text: ev.text });
-    } else if (ev.type === "tool_use") {
-      output.write(`  ⚙ ${ev.name} ${JSON.stringify(ev.input)}\n`);
-      transcript.write({ type: "tool_use", tool: ev.name, input: ev.input });
-    } else if (ev.type === "turn_end") {
-      interrupted = false;
-      transcript.write({ type: "result", ...ev.meta });
-      const r = await ask("\ncontract-ops-agent> ");
-      const next = r.closed ? null : r.answer?.trim();
-      if (!next || next === "/quit") { session.end(); break; }
-      transcript.write({ type: "user", text: next });
-      session.send(next);
-    }
+  } catch (e) {
+    // Anything that escapes the session (an SDK failure, the enclosure guard)
+    // ends the REPL with a clean message, not a stack trace. Enclosure
+    // failures stay fatal — we still refuse to continue.
+    output.write(`\n[fatal] ${e?.message ?? e}\n`);
+    transcript.write({ type: "fatal", message: String(e?.stack ?? e) });
+    process.exitCode = 1;
+  } finally {
+    try { session.end(); } catch { /* already ended */ }
+    if (!rl.closed) rl.close();
   }
-  if (!rl.closed) rl.close();
 }

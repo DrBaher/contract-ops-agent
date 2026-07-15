@@ -14,10 +14,21 @@ export function configDir(env = process.env) {
 export function configPath(env = process.env) { return join(configDir(env), "config.json"); }
 export function credentialsPath(env = process.env) { return join(configDir(env), "credentials.json"); }
 
-export function loadConfig(env = process.env) {
+// Distinguish "no config yet" from "config exists but won't parse" — the
+// latter must never be silently treated as a first run (the wizard would
+// overwrite the user's file).
+export function configState(env = process.env) {
   const p = configPath(env);
-  if (!existsSync(p)) return null;
-  try { return JSON.parse(readFileSync(p, "utf8")); } catch { return null; }
+  if (!existsSync(p)) return { status: "missing", config: null };
+  try {
+    return { status: "ok", config: JSON.parse(readFileSync(p, "utf8")) };
+  } catch (e) {
+    return { status: "corrupt", config: null, error: e.message };
+  }
+}
+
+export function loadConfig(env = process.env) {
+  return configState(env).config;
 }
 
 export function saveConfig(cfg, env = process.env) {
@@ -28,7 +39,7 @@ export function saveConfig(cfg, env = process.env) {
 }
 
 export function isFirstRun(env = process.env) {
-  return loadConfig(env) === null;
+  return configState(env).status === "missing";
 }
 
 // --- secrets: stored keys, in one 0600 file keyed by env-var name ---
@@ -37,7 +48,14 @@ export function isFirstRun(env = process.env) {
 function readCreds(env) {
   const p = credentialsPath(env);
   if (!existsSync(p)) return {};
-  try { return JSON.parse(readFileSync(p, "utf8")); } catch { return {}; }
+  try {
+    return JSON.parse(readFileSync(p, "utf8"));
+  } catch {
+    // A truncated credentials file would otherwise degrade to "no key" with no
+    // explanation — warn so the user knows why auth suddenly asks again.
+    process.stderr.write(`[contract-ops-agent] warning: ${p} is unreadable (corrupt JSON); stored keys are being ignored. Re-run setup to store the key again.\n`);
+    return {};
+  }
 }
 
 export function saveApiKey(envKey, key, env = process.env) {

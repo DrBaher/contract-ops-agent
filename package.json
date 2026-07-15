@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "spike": "node spike.mjs",
-    "test": "node --test test/unit.mjs test/onboarding.mjs",
+    "test": "node --test test/unit.mjs test/onboarding.mjs test/resilience.mjs",
     "test:live": "node --test --test-concurrency=1 test/live.mjs",
     "test:live:openai": "node --test --test-concurrency=1 test/live-openai.mjs",
     "test:loop": "node --test test/loop.mjs"
