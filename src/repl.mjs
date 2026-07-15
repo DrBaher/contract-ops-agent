@@ -114,7 +114,7 @@ function turnFooter(meta, toolCount) {
 // /model switching; a switch ends the session and starts a fresh one — context
 // resets, the enclosure is re-verified. `systemPromptFor(providerId)` supplies
 // the (possibly provider-specific) system prompt for each session.
-export async function startRepl({ provider, workspace, systemPromptFor, model, transcript, prepare = null, knownProviders = [], input = process.stdin, output = process.stdout }) {
+export async function startRepl({ provider, workspace, systemPromptFor, model, transcript, prepare = null, knownProviders = [], resume = null, input = process.stdin, output = process.stdout }) {
   const rl = readline.createInterface({ input, output });
   const ask = makeAsker(rl);
   const spinner = makeSpinner(output);
@@ -189,11 +189,14 @@ export async function startRepl({ provider, workspace, systemPromptFor, model, t
   // One iteration per session; a /model switch ends the session and loops with
   // the pending message for the new provider.
   let pending = r0.text;
+  let resumeInfo = resume; // applied to the FIRST session only — a /model switch starts clean
   try {
     while (pending !== null) {
       const session = cur.provider.startSession({
         workspace, systemPrompt: systemPromptFor(cur.provider.id), model: cur.model, canUseTool,
+        ...(resumeInfo ? { seed: resumeInfo.seed, resume: resumeInfo.sessionId ?? undefined } : {}),
       });
+      resumeInfo = null;
       activeSession = session;
       session.send(pending);
       transcript.write({ type: "user", text: pending });
@@ -223,7 +226,7 @@ export async function startRepl({ provider, workspace, systemPromptFor, model, t
             const n = assertEnclosure({ tools: ev.tools });
             verified = true;
             output.write(`[enclosure verified: ${n} contract-ops tools, nothing else]\n`);
-            transcript.write({ type: "init", tools: ev.tools });
+            transcript.write({ type: "init", tools: ev.tools, ...(ev.sessionId ? { sessionId: ev.sessionId } : {}) });
             spinner.start();
             continue;
           }

@@ -26,9 +26,10 @@ export const DISALLOWED_TOOLS = [
 
 // The Agent SDK enclosure config. No `allowedTools`: it auto-approves before
 // canUseTool fires and would bypass the confirmation gates.
-export function buildOptions({ workspace, canUseTool, systemPrompt, model, maxTurns = 100 }) {
+export function buildOptions({ workspace, canUseTool, systemPrompt, model, maxTurns = 100, resume }) {
   if (!workspace) throw new Error("workspace is required");
   return {
+    ...(resume ? { resume } : {}), // SDK session id — resumes the conversation server-side
     mcpServers: {
       "contract-ops": {
         command: process.execPath,
@@ -64,8 +65,8 @@ export const claudeProvider = {
   // Start a session and return a normalized Session the REPL/tests can drive.
   // `canUseTool` is the gate (makeCanUseTool result). `_mutateOptions` is a
   // test hook to tamper with the SDK options (e.g. inject a foreign MCP server).
-  startSession({ workspace, systemPrompt, model, canUseTool, maxTurns, _mutateOptions }) {
-    const options = buildOptions({ workspace, canUseTool, systemPrompt, model, maxTurns });
+  startSession({ workspace, systemPrompt, model, canUseTool, maxTurns, resume, _mutateOptions }) {
+    const options = buildOptions({ workspace, canUseTool, systemPrompt, model, maxTurns, resume });
     if (_mutateOptions) _mutateOptions(options);
     const queue = makeInputQueue();
     const q = query({ prompt: queue, options });
@@ -76,7 +77,8 @@ export const claudeProvider = {
       async *events() {
         for await (const m of q) {
           if (m.type === "system" && m.subtype === "init") {
-            yield { type: "enclosure", tools: m.tools };
+            // session_id makes the conversation resumable (--resume) later.
+            yield { type: "enclosure", tools: m.tools, sessionId: m.session_id };
           } else if (m.type === "assistant") {
             for (const b of m.message?.content ?? []) {
               if (b.type === "text" && b.text) yield { type: "text", text: b.text };

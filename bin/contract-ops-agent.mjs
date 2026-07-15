@@ -3,7 +3,7 @@ import readline from "node:readline";
 import { execSync } from "node:child_process";
 import { resolve, join } from "node:path";
 import { buildSystemPrompt } from "../src/system-prompt.mjs";
-import { Transcript } from "../src/transcript.mjs";
+import { Transcript, loadResume } from "../src/transcript.mjs";
 import { preflight, renderPreflight } from "../src/preflight.mjs";
 import { startRepl, makeAsker } from "../src/repl.mjs";
 import { prepareModel, knownProviderIds } from "../src/providers/index.mjs";
@@ -24,10 +24,12 @@ contract-ops suite. No shell, no file access, no web, no signing.
 
 Usage:
   contract-ops-agent [--workspace <dir>] [--model <model>]   start the agent (first run: setup wizard)
+  contract-ops-agent --resume [last|<transcript.jsonl>]      continue a prior conversation
   contract-ops-agent setup                                   (re)run the setup wizard
   contract-ops-agent doctor                                  check environment; offer to install what's missing
 
-Auth: bring your own — an Anthropic API key, or your existing Claude Code login.`);
+Auth: bring your own — a Claude API key or Claude Code login, an OpenAI key,
+or a key for any preset/compatible endpoint (see docs/providers.md).`);
   process.exit(0);
 }
 
@@ -112,6 +114,27 @@ if (flag("--model")) model = flag("--model");
 
 const transcript = new Transcript(join(workspace, "transcripts"));
 
+// --resume [last|<path>]: continue a prior conversation. Claude resumes the
+// SDK session natively (needs the recorded session id); loop providers are
+// re-seeded with the transcript's user/assistant turns.
+let resume = null;
+if (argv.includes("--resume")) {
+  const raw = flag("--resume");
+  const arg = raw && !raw.startsWith("-") ? raw : "last";
+  try {
+    resume = loadResume(join(workspace, "transcripts"), arg);
+    if (provider.id === "claude" && !resume.sessionId) {
+      console.warn(`note: ${resume.file} has no Claude session id — claude cannot replay it; starting fresh. (Loop providers can: switch with --model or /model.)`);
+      resume = null;
+    } else {
+      console.log(`resuming:   ${resume.file} (${provider.id === "claude" ? `session ${resume.sessionId}` : `${resume.seed.length} prior messages`})`);
+    }
+  } catch (e) {
+    console.error(`cannot resume: ${e.message}`);
+    process.exit(1);
+  }
+}
+
 console.log(renderPreflight(await preflight()));
 console.log(`provider:   ${provider.id}`);
 console.log(`workspace:  ${workspace}`);
@@ -120,7 +143,7 @@ console.log(`config:     ${join(configDir(), "config.json")}`);
 console.log(`(type /help for commands, /quit to exit)\n`);
 
 await startRepl({
-  provider, workspace, model, transcript,
+  provider, workspace, model, transcript, resume,
   systemPromptFor: buildSystemPrompt,
   prepare: (ref) => prepareModel(ref, cfg),
   knownProviders: knownProviderIds(cfg),

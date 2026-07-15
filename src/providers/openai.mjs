@@ -70,6 +70,14 @@ export function makeOpenAIDriver(client) {
         messages[messages.length - 1] = { ...last, tool_calls: undefined };
       }
     },
+    // Resume: replay a prior transcript's user/assistant text turns into
+    // native history. Tool exchanges aren't replayed (their call ids are gone);
+    // the conversational context is what matters.
+    seedHistory(messages, turns) {
+      for (const t of turns) {
+        if ((t.role === "user" || t.role === "assistant") && t.text) messages.push({ role: t.role, content: t.text });
+      }
+    },
     // Called by the loop before each turn. A long session otherwise grows
     // without bound and eventually blows the model's context window (which
     // would surface as a per-turn inference error). Drop the oldest messages,
@@ -95,7 +103,7 @@ export function makeOpenAIProvider({ id = "openai", apiKeyEnv = "OPENAI_API_KEY"
     envKeys: [apiKeyEnv],
     keyOptional, // local endpoints (Ollama…) run without a key
     defaultModel,
-    startSession({ workspace, systemPrompt, model, canUseTool, maxTurns }) {
+    startSession({ workspace, systemPrompt, model, canUseTool, maxTurns, seed }) {
       const client = new OpenAI({
         // The SDK refuses an absent key even where the endpoint doesn't need
         // one — send a placeholder for key-optional (local) endpoints.
@@ -103,7 +111,7 @@ export function makeOpenAIProvider({ id = "openai", apiKeyEnv = "OPENAI_API_KEY"
         ...(baseURL ? { baseURL } : {}),
       });
       const driver = makeOpenAIDriver(client);
-      return startLoopSession({ workspace, systemPrompt, model: model ?? defaultModel, canUseTool, maxTurns, driver });
+      return startLoopSession({ workspace, systemPrompt, model: model ?? defaultModel, canUseTool, maxTurns, driver, seed });
     },
   };
 }

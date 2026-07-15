@@ -292,3 +292,56 @@ test("corrupt credentials.json warns and degrades to no stored key", () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// --- v0.4 M4: resume ---
+test("loadResume extracts seedable turns and the Claude session id", async () => {
+  const { loadResume } = await import("../src/transcript.mjs");
+  const dir = mkdtempSync(join(tmpdir(), "coa-resume-"));
+  try {
+    const older = join(dir, "2026-07-01T00-00-00-000Z.jsonl");
+    const newer = join(dir, "2026-07-02T00-00-00-000Z.jsonl");
+    writeFileSync(older, JSON.stringify({ type: "user", text: "old" }) + "\n");
+    writeFileSync(newer, [
+      JSON.stringify({ type: "init", tools: ["x"], sessionId: "sess-123" }),
+      JSON.stringify({ type: "user", text: "lint the NDA" }),
+      JSON.stringify({ type: "tool_use", tool: "mcp__contract-ops__lint_contract", input: {} }),
+      JSON.stringify({ type: "assistant", text: "Two findings." }),
+      JSON.stringify({ type: "result", usage: { input: 1, output: 2 } }),
+      "{ torn line",
+    ].join("\n") + "\n");
+
+    const r = loadResume(dir, "last");
+    assert.equal(r.file, newer, "last must pick the newest transcript");
+    assert.equal(r.sessionId, "sess-123");
+    assert.deepEqual(r.seed, [
+      { role: "user", text: "lint the NDA" },
+      { role: "assistant", text: "Two findings." },
+    ]);
+    const explicit = loadResume(dir, older);
+    assert.equal(explicit.file, older);
+    assert.equal(explicit.sessionId, null);
+    assert.throws(() => loadResume(join(dir, "nope")), /no transcripts directory/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a seeded loop session starts with the prior conversation in history", async () => {
+  const seen = [];
+  const driver = scriptedDriver([{ text: "welcome back" }]);
+  driver.seedHistory = (messages, turns) => {
+    for (const t of turns) messages.push({ role: t.role, content: t.text });
+  };
+  const baseInfer = driver.infer.bind(driver);
+  driver.infer = async (opts) => { seen.push(...opts.messages); return baseInfer(opts); };
+  const session = startLoopSession({
+    workspace: "/tmp", systemPrompt: "sp", canUseTool: allowAll, driver,
+    seed: [{ role: "user", text: "earlier question" }, { role: "assistant", text: "earlier answer" }],
+    _connect: async () => fakeMcp(),
+  });
+  const events = [];
+  session.send("continue");
+  await drainTurn(session.events(), events);
+  session.end();
+  assert.deepEqual(seen.map((m) => m.content), ["earlier question", "earlier answer", "continue"]);
+});

@@ -58,9 +58,12 @@ function abortableSleep(ms, signal) {
 //   async infer({ system, tools, messages, model, signal }) -> { text, toolCalls: [{id,name,input}], assistantMessage }
 //   toolResultMessages(results: [{id, content, isError}]) -> native message(s) (array)
 //   repairHistory?(messages)                     make history valid after an abnormal turn end
-export function startLoopSession({ workspace, systemPrompt, model, canUseTool, driver, maxTurns = DEFAULT_MAX_TURNS, retry = DEFAULT_RETRY, _connect = connectMcp }) {
+export function startLoopSession({ workspace, systemPrompt, model, canUseTool, driver, maxTurns = DEFAULT_MAX_TURNS, retry = DEFAULT_RETRY, seed = null, _connect = connectMcp }) {
   const inbox = makeInputQueue();
   const messages = [];
+  // Resume support: seed the history with a prior conversation's user/assistant
+  // turns ([{role, text}]) in the driver's native shape.
+  if (seed?.length && driver.seedHistory) driver.seedHistory(messages, seed);
   let turnAbort = null; // AbortController for the in-flight turn (interrupt target)
 
   return {
