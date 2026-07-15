@@ -40,11 +40,15 @@ export function buildOptions({ workspace, canUseTool, systemPrompt, model, maxTu
       // Signing modes mount sign-cli's own MCP server (least-privilege args
       // per mode). The SDK config has no cwd field, and sign's DB is
       // cwd-relative — spawn via sh so it runs in the workspace, sharing the
-      // DB with the human's sign-cli.
+      // DB with the human's sign-cli. CRITICAL: the workspace and args are
+      // passed as POSITIONAL parameters ($0=workspace, "$@"=serve args), never
+      // interpolated into the script string — string interpolation here is a
+      // shell-injection hole (a workspace path with $(...) or backticks would
+      // execute), which JSON.stringify does NOT close inside sh -c "…".
       ...(signingMode !== "off" ? {
         sign: {
           command: "/bin/sh",
-          args: ["-c", `cd ${JSON.stringify(workspace)} && exec sign ${signServeArgs(signingMode).map((a) => JSON.stringify(a)).join(" ")}`],
+          args: ['-c', 'cd "$0" && exec sign "$@"', workspace, ...signServeArgs(signingMode)],
           env: signServerEnv(),
         },
       } : {}),

@@ -327,14 +327,19 @@ test("D3: doctor validates signing config and fallback refs", async () => {
     assert.match(diag.fallbacks[1].problem, /unknown model provider/);
     assert.match(renderDoctor(diag), /Fallbacks: {3}PROBLEMS/);
 
-    // healthy: sign-cli present, fallback key in env
-    const diag2 = await diagnose({ clis, checkBin: async () => true, env: { ...env, GEMINI_API_KEY: "sk" } });
+    // claude provider + signing → doctor flags it as unsupported there
+    const diagClaude = await diagnose({ clis, checkBin: async () => true, env: { ...env } });
+    assert.match(renderDoctor(diagClaude), /NOT available on the claude provider/);
+
+    // healthy: a LOOP provider, sign-cli present, fallback key in env → activates
+    saveConfig({ model: "openai/gpt-4o", signing: { mode: "prepare" }, fallbacks: ["gemini", "nosuch/x"], auth: { mode: "env", envKey: "OPENAI_API_KEY" } }, env);
+    const diag2 = await diagnose({ clis, checkBin: async () => true, env: { ...env, GEMINI_API_KEY: "sk", OPENAI_API_KEY: "sk" } });
     assert.match(renderDoctor(diag2), /prepare \(config\) — activates when you launch with --enable-signing/);
     assert.match(renderDoctor(diag2), /nosuch\/x: unknown/); // still reported
 
     // invalid mode string → flagged, not crashed
-    saveConfig({ model: "claude", signing: { mode: "yolo" } }, env);
-    const diag3 = await diagnose({ clis, checkBin: async () => true, env: { ...env } });
+    saveConfig({ model: "openai/gpt-4o", signing: { mode: "yolo" }, auth: { mode: "env", envKey: "OPENAI_API_KEY" } }, env);
+    const diag3 = await diagnose({ clis, checkBin: async () => true, env: { ...env, OPENAI_API_KEY: "sk" } });
     assert.match(renderDoctor(diag3), /INVALID mode "yolo"/);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

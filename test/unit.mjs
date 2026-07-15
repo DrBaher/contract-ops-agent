@@ -49,14 +49,17 @@ test("U2b: fill_template path spellings normalize to one key", () => {
   assert.equal(decide(t("fill_template"), { template: "out/nda.md", params: {} }, s).kind, "allow");
 });
 
-test("U2c: convert_to_pdf confirms with output path, remembers per directory", () => {
+test("U2c: convert_to_pdf confirms per output FILE, not per directory", () => {
   const s = newSessionState();
   const d1 = decide(t("convert_to_pdf"), { input: "out/contract.docx" }, s);
   assert.equal(d1.kind, "confirm");
   assert.match(d1.detail, /out\/contract\.pdf/);
   s.approvals.add(d1.key);
-  assert.equal(decide(t("convert_to_pdf"), { input: "out/other.docx" }, s).kind, "allow");
-  assert.equal(decide(t("convert_to_pdf"), { input: "./out/third.docx" }, s).kind, "allow", "normalized dir must match");
+  // same output file (path spellings normalize) → remembered
+  assert.equal(decide(t("convert_to_pdf"), { input: "./out/contract.docx" }, s).kind, "allow", "same output normalizes to the same key");
+  // a DIFFERENT file in the same dir must re-confirm — approving one write
+  // must not auto-allow overwriting a sibling
+  assert.equal(decide(t("convert_to_pdf"), { input: "out/other.docx" }, s).kind, "confirm", "different output must re-confirm");
   assert.equal(decide(t("convert_to_pdf"), { input: "elsewhere/x.docx" }, s).kind, "confirm");
 });
 
@@ -80,11 +83,15 @@ test("U3: run always confirms with boundary-preserving argv", () => {
   assert.match(d3.detail, /"my file\.md"/);
 });
 
-test("U3b: run cannot reach signing — denied client-side", () => {
+test("U3b: run cannot reach signing — denied client-side, evasion-resistant", () => {
   for (const args of [["request", "create"], ["audit", "show"], ["request", "verify-signed-pdf"]]) {
     const d = decide(t("run"), { cli: "sign", args });
     assert.equal(d.kind, "deny", args.join(" "));
     assert.match(d.detail, /human-gated|verify_signature/);
+  }
+  // casing / whitespace variants must not slip past to a mere y/N confirm
+  for (const cli of ["Sign", "SIGN", " sign", "sign "]) {
+    assert.equal(decide(t("run"), { cli, args: [] }).kind, "deny", JSON.stringify(cli));
   }
 });
 

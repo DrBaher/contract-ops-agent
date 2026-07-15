@@ -49,17 +49,34 @@ test("G3: full mode — the signing act demands a TYPED challenge, never remembe
   const sess = newSessionState("full");
   const d = decide(s("sign"), { request_id: "req-42" }, sess);
   assert.equal(d.kind, "confirm");
-  assert.equal(d.challenge, "req-42");
+  assert.equal(d.challenge, "req-42", "challenge is the FULL target, not a basename");
+  assert.equal(d.requireInteractive, true, "signing acts require an interactive TTY");
   assert.equal(d.key, null, "signing approval must never be remembered");
   assert.match(d.detail, /SIGNING ACTION/);
-  const doc = decide(s("document"), { input: "contracts/nda-final.pdf" }, sess);
-  assert.equal(doc.challenge, "nda-final.pdf", "challenge is the concrete target");
+  // `document` uses input_path (the real MCP param) — must resolve, not collapse
+  const doc = decide(s("document"), { input_path: "contracts/nda-final.pdf", out_path: "sealed.pdf", signer_name: "B" }, sess);
+  assert.equal(doc.kind, "confirm");
+  assert.equal(doc.challenge, "contracts/nda-final.pdf", "document target must be its input_path");
+  assert.match(doc.detail, /nda-final\.pdf/);
   // reissue is y/N, not typed
   assert.equal(decide(s("signer_reissue_token"), { request_id: "r" }, sess).challenge, undefined);
   // contract-ops tools are untouched by signing mode
   assert.equal(decide(`${PREFIX}lint_contract`, { path: "a.md" }, sess).kind, "allow");
   // and the run escape hatch still refuses sign regardless of mode
   assert.equal(decide(`${PREFIX}run`, { cli: "sign", args: ["request", "create"] }, sess).kind, "deny");
+});
+
+test("G3b: a signing act with no resolvable target is DENIED, not blindly challenged", () => {
+  const sess = newSessionState("full");
+  // empty-string request_id must not short-circuit a real path, and a call
+  // with no target at all must be refused (never a generic 'type sign' prompt)
+  assert.equal(decide(s("sign"), {}, sess).kind, "deny");
+  assert.equal(decide(s("sign"), { request_id: "" }, sess).kind, "deny");
+  assert.equal(decide(s("document"), { out_path: "x.pdf" }, sess).kind, "deny", "out_path alone is not the doc being sealed");
+  // an empty request_id must NOT hide a real input_path — the path wins
+  const d = decide(s("sign"), { request_id: "", input: "real/target.pdf" }, sess);
+  assert.equal(d.kind, "confirm");
+  assert.equal(d.challenge, "real/target.pdf");
 });
 
 test("G4: makeCanUseTool hands the challenge to the prompter", async () => {
@@ -80,6 +97,16 @@ test("E1: enclosure assertion accepts exactly the mode's sign tools", () => {
   assert.throws(() => assertEnclosure({ tools: [...co, s("sign")] }, "prepare"), /breach.*sign/);
   assert.equal(assertEnclosure({ tools: [...co, s("sign")] }, "full"), 2);
   assert.throws(() => assertEnclosure({ tools: [...co, "mcp__other__x"] }, "full"), /breach/);
+});
+
+test("E2: a signing mode with NO sign tools mounted fails loudly (no silent lie)", () => {
+  const co = [`${PREFIX}lint_contract`];
+  // off mode is fine with no sign tools
+  assert.equal(assertEnclosure({ tools: co }, "off"), 1);
+  // but an active mode that mounted zero sign tools (e.g. the SDK rejected the
+  // sign server) must throw, not pretend to have signing capability
+  assert.throws(() => assertEnclosure({ tools: co }, "prepare"), /no sign tools mounted/);
+  assert.throws(() => assertEnclosure({ tools: co }, "full"), /no sign tools mounted/);
 });
 
 test("S1: serve args + double opt-in", () => {
@@ -179,6 +206,7 @@ test("R1: the REPL's typed gate — wrong input declines, exact input approves",
     },
   };
   const input = new PassThrough();
+  input.isTTY = true; // signing acts require an interactive terminal
   const output = new PassThrough();
   let printed = "";
   output.on("data", (c) => { printed += c.toString(); });
@@ -192,9 +220,43 @@ test("R1: the REPL's typed gate — wrong input declines, exact input approves",
     input, output,
   });
   assert.deepEqual(outcomes, ["deny", "allow"]);
-  assert.match(printed, /type "REQ-7" to approve/);
+  assert.match(printed, /exactly: REQ-7/);
   assert.match(printed, /gate said deny/);
   assert.match(printed, /gate said allow/);
+});
+
+test("R2: a signing act is REFUSED on non-interactive (piped) input", async () => {
+  const outcomes = [];
+  const provider = {
+    id: "fake", envKeys: [], keyOptional: true,
+    startSession({ canUseTool }) {
+      const inbox = makeInputQueue();
+      return {
+        send(t) { inbox.push(t); }, end() { inbox.close(); }, async interrupt() {},
+        async *events() {
+          yield { type: "enclosure", tools: [`${PREFIX}lint_contract`, `${SIGN_PREFIX}sign`] };
+          for await (const _t of inbox) {
+            const o = await canUseTool(`${SIGN_PREFIX}sign`, { request_id: "REQ-7" });
+            outcomes.push(o.behavior);
+            yield { type: "text", text: `gate said ${o.behavior}` };
+            yield { type: "turn_end", meta: {} };
+          }
+        },
+      };
+    },
+  };
+  const input = new PassThrough(); // NOT a TTY — piped
+  const output = new PassThrough();
+  let printed = "";
+  output.on("data", (c) => { printed += c.toString(); });
+  input.write("sign it\n/quit\n"); // refused outright — no typed answer is even consumed
+  await startRepl({
+    provider, model: "m", workspace: "/w",
+    systemPromptFor: () => "sp", transcript: { write() {} }, signingMode: "full",
+    input, output,
+  });
+  assert.deepEqual(outcomes, ["deny"], "piped input can never approve a signature");
+  assert.match(printed, /REFUSED — a signing action needs interactive confirmation/);
 });
 
 test("LIVE1: real `sign mcp serve` in prepare mode hides the signing act server-side", { skip: skipNoSign }, async () => {
@@ -225,15 +287,17 @@ test("LIVE2: real `sign mcp serve` in full mode exposes the signing act", { skip
   }
 });
 
-test("G5: a degenerate signing target never yields an empty typed challenge", () => {
+test("G5: no signing challenge is ever empty — absent/blank targets deny", () => {
   const sess = newSessionState("full");
-  for (const target of ["/", "//", "  "]) {
-    const d = decide(s("sign"), { path: target }, sess);
-    assert.equal(d.kind, "confirm");
-    assert.ok(d.challenge && d.challenge.trim().length > 0, `challenge for ${JSON.stringify(target)} must be non-empty`);
-  }
-  // no target at all → the tool name is the challenge
-  assert.equal(decide(s("document"), {}, sess).challenge, "document");
+  // whitespace-only and absent targets carry no binding → deny outright
+  for (const path of ["  ", "\t"]) assert.equal(decide(s("sign"), { path }, sess).kind, "deny", JSON.stringify(path));
+  assert.equal(decide(s("document"), {}, sess).kind, "deny");
+  // any target that DOES resolve yields a confirm whose challenge is the full,
+  // non-empty target (bare Enter can never satisfy it)
+  const d = decide(s("sign"), { path: "/" }, sess);
+  assert.equal(d.kind, "confirm");
+  assert.equal(d.challenge, "/");
+  assert.ok(d.challenge.length > 0);
 });
 
 test("LIVE3: full-mode live catalog is a subset of the allowed list (no drift)", { skip: skipNoSign }, async () => {

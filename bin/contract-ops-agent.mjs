@@ -188,6 +188,13 @@ try {
   const s = resolveSigningMode(cfg, argv);
   signingMode = s.mode;
   if (s.warning) console.warn(`note: ${s.warning}`);
+  // The Agent SDK's strict MCP client rejects the current sign-cli's schema, so
+  // signing tools only mount on a loop provider. Refuse up front with guidance
+  // rather than let the enclosure assertion fail mid-session.
+  if (signingMode !== "off" && provider.id === "claude") {
+    console.error(`signing.mode "${signingMode}" is not supported on the claude provider yet (the Agent SDK's strict MCP client rejects sign-cli's schema).\nUse a loop provider for signing — e.g. \`--model openai/gpt-4o\` (or set "model" in config) — then relaunch with --enable-signing.`);
+    process.exit(1);
+  }
   if (signingMode !== "off") console.log(`signing:    ${signingMode} — sign-cli mounted (${signingMode === "prepare" ? "tracking + PDF preparation; the signing act is impossible" : "INCLUDES the signing act; each one requires typed approval"})`);
 } catch (e) {
   console.error(e.message);

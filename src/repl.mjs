@@ -126,16 +126,24 @@ export async function startRepl({ provider, workspace, systemPromptFor, model, t
   // A pending gate question registers its AbortController here so SIGINT can
   // cancel it (→ declined, no approval recorded) instead of deadlocking.
   let activeGateAbort = null;
-  const gatePrompter = async (_toolName, _input, detail, challenge) => {
+  // A signing challenge may only be approved from an interactive terminal:
+  // on piped/scripted input the "typed consent" would just be the next line
+  // of the input stream, which is not a human reading the prompt.
+  const interactive = input.isTTY === true;
+  const gatePrompter = async (_toolName, _input, detail, challenge, requireInteractive) => {
     const ctl = new AbortController();
     activeGateAbort = ctl;
     spinner.stop(); // the question owns the terminal while it's pending
     try {
       if (challenge) {
+        if (requireInteractive && !interactive) {
+          output.write(`\n⚖ gate: ${detail}\n  REFUSED — a signing action needs interactive confirmation; not available on piped/non-TTY input.\n`);
+          return false;
+        }
         // Signing act: consent means TYPING the target back — y/N is not
         // enough for a legally meaningful, irreversible action. An empty
         // answer NEVER approves, whatever the challenge is.
-        const { answer, aborted, closed } = await ask(`\n⚖ gate: ${detail}\n  type "${challenge}" to approve (anything else declines): `, ctl.signal);
+        const { answer, aborted, closed } = await ask(`\n⚖ gate: ${detail}\n  type the target to approve — exactly: ${challenge}\n  > `, ctl.signal);
         if (aborted || closed) return false;
         const typed = String(answer).trim();
         return typed.length > 0 && typed === challenge;

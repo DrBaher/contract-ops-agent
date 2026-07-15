@@ -17,5 +17,16 @@ export function assertEnclosure(initMessage, signingMode = "off") {
   if (leaked.length > 0) {
     throw new Error(`Enclosure breach: unexpected tools mounted: ${leaked.join(", ")}`);
   }
+  // When a signing mode is active, the sign tools MUST actually be present —
+  // otherwise the session would advertise "sign:<mode>" while silently having
+  // no signing capability (e.g. the Agent SDK's strict MCP client rejecting a
+  // sign server whose schema it won't accept). Fail loudly rather than lie.
+  if (signingMode !== "off" && !tools.some((n) => n.startsWith(SIGN_PREFIX))) {
+    throw new Error(
+      `Signing mode "${signingMode}" is active but no sign tools mounted — the sign server did not register. ` +
+      `Signing modes require a sign-cli whose MCP schema the provider accepts; on the Claude/Agent-SDK provider this needs a spec-compliant sign-cli. ` +
+      `Use a loop provider (e.g. openai/…) for signing, or update sign-cli.`,
+    );
+  }
   return tools.length;
 }

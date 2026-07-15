@@ -93,6 +93,7 @@ export function renderDoctor(diag) {
     if (!sg.valid) lines.push(`Signing:     INVALID mode "${sg.mode}" — use off | prepare | full`);
     else if (sg.mode === "off") lines.push(`Signing:     off`);
     else if (sg.signBin === false) lines.push(`Signing:     ${sg.mode} (config) — but sign-cli is MISSING; install it or set signing.mode to off`);
+    else if (diag.providerId === "claude") lines.push(`Signing:     ${sg.mode} (config) — NOT available on the claude provider (SDK rejects sign-cli's schema); use a loop provider (openai/…)`);
     else lines.push(`Signing:     ${sg.mode} (config) — activates when you launch with --enable-signing`);
   }
   if (diag.fallbacks?.length) {

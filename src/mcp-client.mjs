@@ -45,7 +45,14 @@ export async function connectMcp(workspace) {
 }
 
 // Env for sign-cli's MCP server: same least-privilege allowlist as the suite
-// CLIs, plus sign-cli's own SIGN_* configuration variables (profiles, tokens).
+// CLIs, plus sign-cli's own SIGN_* configuration variables (profiles, tokens,
+// DB path, provider). Trust boundary: SIGN_* is forwarded wholesale ON PURPOSE
+// so the agent signs into the SAME sign-cli configuration (DB, profile,
+// provider) the human already uses interactively — anything narrower would
+// silently diverge the two. This means a SIGN_* value in the launching
+// environment steers where signatures are recorded; that is the user's own
+// environment, and signing is doubly opt-in, so it is trusted input. Do not
+// forward non-SIGN_* secrets (ANTHROPIC_API_KEY etc. are withheld by omission).
 export function signServerEnv() {
   const allow = ["PATH", "HOME", "TMPDIR", "TEMP", "TMP", "LANG", "LC_ALL", "LC_CTYPE", "USER", "SHELL", "SystemRoot"];
   const env = {};
