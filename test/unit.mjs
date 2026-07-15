@@ -361,3 +361,30 @@ test("O3: OpenAI driver accepts tool_calls that omit `type` (compatible endpoint
   assert.deepEqual(out2.toolCalls, []);
   assert.equal(out2.assistantMessage.tool_calls, undefined);
 });
+
+// --- REPL input parsing (Tier-2 UX: /help, unknown commands never reach the model) ---
+test("R1: parseReplInput routes commands, prose, and noise correctly", async () => {
+  const { parseReplInput } = await import("../src/repl.mjs");
+  assert.deepEqual(parseReplInput("review the NDA"), { kind: "send", text: "review the NDA" });
+  assert.deepEqual(parseReplInput("  /quit "), { kind: "quit" });
+  assert.deepEqual(parseReplInput("/exit"), { kind: "quit" });
+  assert.deepEqual(parseReplInput("/q"), { kind: "quit" });
+  assert.deepEqual(parseReplInput("/help"), { kind: "help" });
+  assert.deepEqual(parseReplInput("/?"), { kind: "help" });
+  assert.deepEqual(parseReplInput(""), { kind: "empty" });
+  assert.deepEqual(parseReplInput("   "), { kind: "empty" });
+  assert.deepEqual(parseReplInput("/model gpt-4o"), { kind: "unknown", cmd: "/model" });
+  // A path-like leading slash is still a command shape — users must not
+  // accidentally send "/etc/hosts" as a command; document the tradeoff:
+  assert.equal(parseReplInput("/etc/hosts please").kind, "unknown");
+});
+
+test("R2: OpenAI driver normalizes usage for the turn footer", async () => {
+  const { makeOpenAIDriver } = await import("../src/providers/openai.mjs");
+  const client = { chat: { completions: { create: async () => ({
+    choices: [{ message: { role: "assistant", content: "hi" } }],
+    usage: { prompt_tokens: 120, completion_tokens: 45 },
+  }) } } };
+  const out = await makeOpenAIDriver(client).infer({ system: "s", tools: [], messages: [], model: "m" });
+  assert.deepEqual(out.usage, { input: 120, output: 45 });
+});

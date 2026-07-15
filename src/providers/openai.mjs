@@ -47,7 +47,11 @@ export function makeOpenAIDriver(client) {
         .filter((tc) => tc?.function?.name)
         .map((tc) => ({ id: tc.id, name: tc.function.name, input: safeJson(tc.function.arguments) }));
       const assistantMessage = toolCalls.length ? m : { ...m, tool_calls: undefined };
-      return { text: m.content || "", toolCalls, assistantMessage };
+      // Normalized usage so the REPL can show a per-turn token footer.
+      const usage = res.usage
+        ? { input: res.usage.prompt_tokens ?? 0, output: res.usage.completion_tokens ?? 0 }
+        : undefined;
+      return { text: m.content || "", toolCalls, assistantMessage, usage };
     },
     // OpenAI wants one `role:"tool"` message per result, keyed by tool_call_id.
     toolResultMessages(results) {

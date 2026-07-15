@@ -92,6 +92,7 @@ export function startLoopSession({ workspace, systemPrompt, model, canUseTool, d
           turnAbort = ctl;
           let iterations = 0;
           const meta = {};
+          const usage = { input: 0, output: 0 }; // summed across the turn's model calls
           try {
             turn: for (;;) {
               if (ctl.signal.aborted) { meta.interrupted = true; break; }
@@ -120,6 +121,11 @@ export function startLoopSession({ workspace, systemPrompt, model, canUseTool, d
                 }
               }
               const { text, toolCalls, assistantMessage } = inferred;
+              if (inferred.usage) {
+                usage.input += inferred.usage.input ?? 0;
+                usage.output += inferred.usage.output ?? 0;
+                meta.usage = usage;
+              }
               if (assistantMessage) messages.push(assistantMessage);
               if (text) yield { type: "text", text };
               if (!toolCalls || toolCalls.length === 0) break;

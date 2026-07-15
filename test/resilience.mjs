@@ -180,6 +180,23 @@ test("maxTurns emits a notice instead of silently truncating", async () => {
   assert.ok(events.some((e) => e.type === "notice" && /maxTurns/.test(e.text)));
 });
 
+test("turn_end meta accumulates usage across a multi-call turn", async () => {
+  const driver = scriptedDriver([
+    { toolCalls: [{ id: "c1", name: LINT, input: {} }], usage: { input: 100, output: 20 } },
+    { text: "done", usage: { input: 150, output: 30 } },
+  ]);
+  const baseInfer = driver.infer.bind(driver);
+  let j = 0;
+  const usages = [{ input: 100, output: 20 }, { input: 150, output: 30 }];
+  driver.infer = async (opts) => ({ ...(await baseInfer(opts)), usage: usages[j++] });
+  const session = startSession(driver);
+  const events = [];
+  session.send("go");
+  const end = await drainTurn(session.events(), events);
+  session.end();
+  assert.deepEqual(end.meta.usage, { input: 250, output: 50 });
+});
+
 test("openai repairHistory strips dangling tool_calls after an abnormal turn", () => {
   const driver = makeOpenAIDriver(/* client */ null);
   const messages = [

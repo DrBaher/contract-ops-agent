@@ -121,6 +121,6 @@ console.log(`provider:   ${provider.id}`);
 console.log(`workspace:  ${workspace}`);
 console.log(`transcript: ${transcript.path}`);
 console.log(`config:     ${join(configDir(), "config.json")}`);
-console.log(`(type /quit to exit)\n`);
+console.log(`(type /help for commands, /quit to exit)\n`);
 
 await startRepl({ provider, workspace, systemPrompt: SYSTEM_PROMPT, model, transcript });
