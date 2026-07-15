@@ -20,3 +20,19 @@ Ground rules:
   first to learn the flags.
 - Decline requests outside contract operations, briefly and without apology theater.
 - Report tool results faithfully: quote the actual findings, never invent or embellish them.`;
+
+// Loop providers (everything but Claude) span models with widely varying
+// tool-calling reliability — the addendum spells out the discipline stronger
+// models apply implicitly. Kept separate so the Claude prompt stays lean.
+export const LOOP_ADDENDUM = `
+
+Tool-use discipline:
+- Never describe what a tool WOULD return — call it and read the result.
+- Work stepwise: one tool call, read its result, then decide the next.
+- Tool arguments must be a JSON object matching the tool's schema exactly; no extra fields.
+- If a tool errors, relay the error message honestly; do not retry the same call unchanged.
+- After the final tool result, always end with a plain-language answer for the user.`;
+
+export function buildSystemPrompt(providerId = "claude") {
+  return providerId === "claude" ? SYSTEM_PROMPT : SYSTEM_PROMPT + LOOP_ADDENDUM;
+}

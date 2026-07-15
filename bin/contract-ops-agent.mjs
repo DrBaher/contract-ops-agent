@@ -2,7 +2,7 @@
 import readline from "node:readline";
 import { execSync } from "node:child_process";
 import { resolve, join } from "node:path";
-import { SYSTEM_PROMPT } from "../src/system-prompt.mjs";
+import { buildSystemPrompt } from "../src/system-prompt.mjs";
 import { Transcript } from "../src/transcript.mjs";
 import { preflight, renderPreflight } from "../src/preflight.mjs";
 import { startRepl, makeAsker } from "../src/repl.mjs";
@@ -126,4 +126,4 @@ console.log(`transcript: ${transcript.path}`);
 console.log(`config:     ${join(configDir(), "config.json")}`);
 console.log(`(type /help for commands, /quit to exit)\n`);
 
-await startRepl({ provider, workspace, systemPrompt: SYSTEM_PROMPT, model, transcript });
+await startRepl({ provider, workspace, systemPrompt: buildSystemPrompt(provider.id), model, transcript });

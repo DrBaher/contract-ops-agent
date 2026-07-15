@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { openaiProvider } from "../src/providers/openai.mjs";
 import { makeCanUseTool, newSessionState, PREFIX } from "../src/gates.mjs";
-import { SYSTEM_PROMPT } from "../src/system-prompt.mjs";
+import { buildSystemPrompt } from "../src/system-prompt.mjs";
 import { assertEnclosure } from "../src/enclosure-assert.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -29,7 +29,7 @@ async function runLive({ prompt, decider = async () => true, maxTurns = 25 }) {
   const canUseTool = makeCanUseTool(session, decider, (e) => gateEvents.push(e));
   const sess = openaiProvider.startSession({
     workspace: WORKSPACE,
-    systemPrompt: SYSTEM_PROMPT,
+    systemPrompt: buildSystemPrompt(openaiProvider.id), // what the bin really sends on loop providers
     canUseTool,
     maxTurns,
   });

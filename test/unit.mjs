@@ -412,3 +412,12 @@ test("P5: a config.providers entry overrides a preset (but never a core built-in
   // unknown providers list presets in the "have" hint
   assert.throws(() => resolveProvider("nosuch"), /gemini.*ollama|ollama.*gemini/s);
 });
+
+test("SP1: buildSystemPrompt — Claude stays lean, loop providers get the tool-use addendum", async () => {
+  const { SYSTEM_PROMPT, LOOP_ADDENDUM, buildSystemPrompt } = await import("../src/system-prompt.mjs");
+  assert.equal(buildSystemPrompt("claude"), SYSTEM_PROMPT);
+  assert.equal(buildSystemPrompt("openai"), SYSTEM_PROMPT + LOOP_ADDENDUM);
+  assert.equal(buildSystemPrompt("gemini"), SYSTEM_PROMPT + LOOP_ADDENDUM);
+  assert.match(buildSystemPrompt("openai"), /Tool-use discipline/);
+  assert.ok(buildSystemPrompt("openai").startsWith(SYSTEM_PROMPT), "addendum must extend, not replace");
+});
