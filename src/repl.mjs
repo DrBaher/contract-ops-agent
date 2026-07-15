@@ -26,7 +26,11 @@ export function makeAsker(rl) {
       rl.output?.write?.(`${question}${answer}\n`);
       return resolve({ answer });
     }
-    if (closed) return resolve({ closed: true });
+    // `readableEnded` covers stdin that finished BEFORE this interface was
+    // created (e.g. the setup wizard's readline drained a pipe first) — no
+    // close event will ever fire, and an unguarded question would hang the
+    // process on an unsettled await.
+    if (closed || rl.input?.readableEnded) return resolve({ closed: true });
     let done = false;
     const finish = (v) => {
       if (done) return;

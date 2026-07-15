@@ -116,7 +116,14 @@ if (cfgState.status === "corrupt") {
   process.exit(1);
 }
 if (cfgState.status === "missing") {
-  await withAsker((ask, askSecret) => runSetup({ ask, askSecret, runInstall, out: (m) => console.log(m) }));
+  try {
+    await withAsker((ask, askSecret) => runSetup({ ask, askSecret, runInstall, out: (m) => console.log(m) }));
+  } catch (e) {
+    // Most commonly an unwritable config dir (e.g. a bind-mounted volume owned
+    // by another uid) — fail with the reason, not a stack trace.
+    console.error(`setup failed: ${e.message}\n(config dir: ${configDir()})`);
+    process.exit(1);
+  }
   console.log("\nStarting…\n");
 }
 

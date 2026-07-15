@@ -504,3 +504,13 @@ test("T1: runTool — list, unknown tool, read-only runs ungated, consequential 
   assert.equal(code3, 0);
   assert.equal(calls.at(-1).name, "fill_template");
 });
+
+test("makeAsker resolves closed when stdin ended before the interface existed", async () => {
+  const fakeRl = {
+    input: { readableEnded: true },
+    on() {}, off() {},
+    question() { throw new Error("must not arm a question on ended stdin"); },
+  };
+  const ask = makeAsker(fakeRl);
+  assert.deepEqual(await ask("prompt> "), { closed: true });
+});

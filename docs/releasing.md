@@ -35,6 +35,15 @@ exist on npm yet, so bootstrap it once:
 
 After that, every release is just a tag push.
 
+## Container image (same tag)
+
+`.github/workflows/container.yml` also triggers on `v*` tags: it waits for npm
+to serve the new version, then buildx-pushes
+`ghcr.io/drbaher/contract-ops-agent:<version>` and `:latest`
+(linux/amd64 + arm64). The Dockerfile bundles the agent, the full CLI suite,
+and LibreOffice for PDF; config lives on a `/config` volume. Test locally with
+`docker build -t contract-ops-agent:test .`.
+
 ### Cutting a release
 
 ```bash

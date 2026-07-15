@@ -24,6 +24,20 @@ contract-ops-agent          # first run: a one-time setup wizard, then the REPL
 
 (From a source checkout: `npm install` then `node bin/contract-ops-agent.mjs`.)
 
+**Zero-setup (Docker):** everything bundled — the agent, all nine CLIs, and a
+PDF backend. Bring only a model key:
+
+```bash
+docker run -it --rm \
+  -v "$PWD:/workspace" \
+  -v contract-ops-config:/config \
+  -e OPENAI_API_KEY \
+  ghcr.io/drbaher/contract-ops-agent
+```
+
+The named `contract-ops-config` volume persists your config and stored keys
+across runs; subcommands work the same way (`… ghcr.io/drbaher/contract-ops-agent doctor`).
+
 The **first run** walks a short wizard — it checks which contract-ops CLIs are
 installed (and offers to install any that are missing), picks your workspace
 directory, and picks your **model & auth**: Claude, OpenAI, or a custom
