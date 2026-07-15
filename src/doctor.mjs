@@ -17,8 +17,10 @@ export async function diagnose({ clis = CLIS, checkBin = defaultCheckBin, env = 
     cliRows,
     missing,
     pdfBackend,
+    provider: cfg?.model ?? null,
     auth: {
       configured: cfg?.auth?.mode ?? null,
+      envKey: cfg?.auth?.envKey ?? null,
       apiKeyInEnv: !!env.ANTHROPIC_API_KEY,
       claudeCodeToken: !!env.CLAUDE_CODE_OAUTH_TOKEN,
     },
@@ -39,6 +41,7 @@ export function renderDoctor(diag) {
   lines.push(`CLIs:        ${okCount}/${diag.cliRows.length} installed`);
   for (const m of diag.missing) lines.push(`  missing ${m.bin.padEnd(16)} install: ${m.install}`);
   lines.push(`PDF backend: ${diag.pdfBackend ? "present" : "MISSING (convert_to_pdf needs LibreOffice/soffice)"}`);
+  lines.push(`Provider:    ${diag.provider ?? "not configured (defaults to claude)"}`);
   const a = diag.auth;
   const authState = a.configured
     ? `configured (${a.configured})`

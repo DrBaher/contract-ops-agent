@@ -1,6 +1,7 @@
 import { resolve } from "node:path";
 import { saveConfig, saveApiKey } from "./config.mjs";
 import { diagnose, installPlan } from "./doctor.mjs";
+import { RESERVED_PROVIDER_IDS } from "./providers/index.mjs";
 
 const yes = (s, dflt = true) => {
   const t = String(s ?? "").trim();
@@ -10,11 +11,17 @@ const yes = (s, dflt = true) => {
 
 function authLabel(auth) {
   switch (auth.mode) {
-    case "api-key": return "Anthropic API key (stored locally)";
+    case "api-key": return "API key (stored locally)";
     case "claude-code": return "Claude Code subscription";
-    case "env": return "ANTHROPIC_API_KEY from the environment";
+    case "env": return `key from the environment (${auth.envKey})`;
     default: return auth.mode;
   }
+}
+
+function providerLabel(model) {
+  if (!model || model === "claude") return "Claude";
+  if (model.startsWith("openai/")) return `OpenAI (${model.slice("openai/".length)})`;
+  return model;
 }
 
 // The guided first-run wizard (our `openclaw onboard`). `ask(question) ->
@@ -22,7 +29,7 @@ function authLabel(auth) {
 // `checkBin` and `runInstall` are injected so tests never touch PATH or run real
 // installs. `out` receives the human-facing narration (no-op in tests). Writes
 // config + (optionally) the 0600 credentials file, and returns the saved config.
-export async function runSetup({ ask, env = process.env, cwd = process.cwd(), checkBin, runInstall, out = () => {} }) {
+export async function runSetup({ ask, askSecret = ask, env = process.env, cwd = process.cwd(), checkBin, runInstall, out = () => {} }) {
   out("");
   out("  contract-ops-agent");
   out("  A contract assistant that can use ONLY the contract-ops tools — extract,");
@@ -70,37 +77,80 @@ export async function runSetup({ ask, env = process.env, cwd = process.cwd(), ch
   const workspace = resolve(wsAns || cwd);
   out("");
 
-  // ── Step 3/3 · Authentication (delegate, never implement claude.ai login) ─
-  out("Step 3/3 · Authentication");
-  out("  How should the agent reach Claude? (your credentials stay on this machine)");
-  let auth;
-  if (env.ANTHROPIC_API_KEY && yes(await ask("  Found ANTHROPIC_API_KEY in your environment — use it? [Y/n] "))) {
-    auth = { mode: "env" };
-  }
-  if (!auth) {
-    const choice = (await ask(
-      "  1) Anthropic API key — paste a key from console.anthropic.com; billed per use.\n" +
-      "       Saved on this machine only, owner-readable (chmod 600); sent only to Anthropic.\n" +
-      "  2) Claude Code subscription — reuse the login you already have in Claude Code;\n" +
-      "       draws on your existing plan, nothing to paste, no separate key.\n" +
-      "  Choose [1/2]: ",
-    )).trim();
-    if (choice === "2") {
-      auth = { mode: "claude-code" };
-      out("  Great — it'll use your Claude Code login. (Not logged in yet? Run:  claude setup-token)");
+  // ── Step 3/3 · Model & Authentication (credentials stay on this machine) ──
+  out("Step 3/3 · Model & Authentication");
+  out("  Which model provider should drive the agent?");
+  const pChoice = (await ask(
+    "  1) Anthropic Claude — a Claude API key, or your existing Claude Code subscription\n" +
+    "  2) OpenAI (GPT)     — your OpenAI API key\n" +
+    "  3) Other endpoint   — any OpenAI-compatible API (Gemini, Grok, DeepSeek, Ollama, a local server…)\n" +
+    "  Choose [1/2/3]: ",
+  )).trim();
+
+  let model, auth, providers;
+  if (pChoice === "3") {
+    // Any OpenAI-compatible endpoint — reaches the long tail with one adapter.
+    out("  Base-URL examples:");
+    out("    Gemini:  https://generativelanguage.googleapis.com/v1beta/openai/");
+    out("    Grok:    https://api.x.ai/v1        Ollama (local): http://localhost:11434/v1");
+    let name = ((await ask("  A short name for it [custom]: ")).trim() || "custom")
+      .toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+    if (!name) name = "custom"; // degenerate input (e.g. all separators) → sane default
+    if (RESERVED_PROVIDER_IDS.includes(name)) {
+      out(`  "${name}" is a built-in provider name — using "${name}-endpoint" so it doesn't collide.`);
+      name = `${name}-endpoint`;
+    }
+    const baseUrl = (await ask("  Base URL: ")).trim();
+    const envKey = `${name.toUpperCase().replace(/[^A-Z0-9]/g, "_")}_API_KEY`;
+    const key = (await askSecret("  API key (blank if the endpoint needs none): ")).trim();
+    if (key) { saveApiKey(envKey, key, env); auth = { mode: "api-key", envKey }; out("  Saved (chmod 600)."); }
+    else { auth = { mode: "env", envKey }; }
+    const m = (await ask("  Model id: ")).trim() || "default";
+    providers = { [name]: { baseUrl, apiKeyEnv: envKey } };
+    model = `${name}/${m}`;
+  } else if (pChoice === "2") {
+    // OpenAI — API key only (subscription auth is a Claude-only path).
+    const envKey = "OPENAI_API_KEY";
+    if (env.OPENAI_API_KEY && yes(await ask("  Found OPENAI_API_KEY in your environment — use it? [Y/n] "))) {
+      auth = { mode: "env", envKey };
     } else {
-      const key = (await ask("  Paste your Anthropic API key: ")).trim();
-      if (key) { saveApiKey(key, env); auth = { mode: "api-key" }; out("  Saved to ~/.config/contract-ops-agent/credentials.json (chmod 600)."); }
-      else { auth = { mode: "env" }; out("  No key entered — it'll read ANTHROPIC_API_KEY from your environment at run time."); }
+      const key = (await askSecret("  Paste your OpenAI API key: ")).trim();
+      if (key) { saveApiKey(envKey, key, env); auth = { mode: "api-key", envKey }; out("  Saved (chmod 600), sent only to OpenAI."); }
+      else { auth = { mode: "env", envKey }; out("  No key entered — it'll read OPENAI_API_KEY from your environment."); }
+    }
+    const m = (await ask("  Model [gpt-4o]: ")).trim() || "gpt-4o";
+    model = `openai/${m}`;
+  } else {
+    // Claude (default) — API key, or the Claude Code subscription login.
+    const envKey = "ANTHROPIC_API_KEY";
+    model = "claude";
+    if (env.ANTHROPIC_API_KEY && yes(await ask("  Found ANTHROPIC_API_KEY in your environment — use it? [Y/n] "))) {
+      auth = { mode: "env", envKey };
+    } else {
+      const choice = (await ask(
+        "  1) Anthropic API key — paste a key from console.anthropic.com; billed per use.\n" +
+        "       Saved on this machine only, owner-readable (chmod 600); sent only to Anthropic.\n" +
+        "  2) Claude Code subscription — reuse the login you already have in Claude Code;\n" +
+        "       draws on your existing plan, nothing to paste, no separate key.\n" +
+        "  Choose [1/2]: ",
+      )).trim();
+      if (choice === "2") {
+        auth = { mode: "claude-code" };
+        out("  Great — it'll use your Claude Code login. (Not logged in yet? Run:  claude setup-token)");
+      } else {
+        const key = (await askSecret("  Paste your Anthropic API key: ")).trim();
+        if (key) { saveApiKey(envKey, key, env); auth = { mode: "api-key", envKey }; out("  Saved (chmod 600)."); }
+        else { auth = { mode: "env", envKey }; out("  No key entered — it'll read ANTHROPIC_API_KEY from your environment."); }
+      }
     }
   }
 
-  const cfg = saveConfig({ workspace, auth }, env);
+  const cfg = saveConfig({ workspace, model, auth, ...(providers ? { providers } : {}) }, env);
 
   // ── Summary ─────────────────────────────────────────────────────────────
   out("");
   out("You're set:");
-  out("  provider    Claude");
+  out(`  provider    ${providerLabel(model)}`);
   out(`  workspace   ${workspace}`);
   out(`  auth        ${authLabel(auth)}`);
   out("");

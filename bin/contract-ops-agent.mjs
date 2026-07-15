@@ -2,12 +2,11 @@
 import readline from "node:readline";
 import { execSync } from "node:child_process";
 import { resolve, join } from "node:path";
-import { buildOptions } from "../src/options.mjs";
-import { makeCanUseTool, newSessionState } from "../src/gates.mjs";
 import { SYSTEM_PROMPT } from "../src/system-prompt.mjs";
 import { Transcript } from "../src/transcript.mjs";
 import { preflight, renderPreflight } from "../src/preflight.mjs";
 import { startRepl, makeAsker } from "../src/repl.mjs";
+import { resolveProvider, modelFromRef } from "../src/providers/index.mjs";
 import { isFirstRun, loadConfig, applyAuth, configDir } from "../src/config.mjs";
 import { runSetup } from "../src/setup.mjs";
 import { diagnose, renderDoctor, installPlan } from "../src/doctor.mjs";
@@ -39,7 +38,23 @@ function withAsker(fn) {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   const mkAsk = makeAsker(rl);
   const ask = async (q) => { const r = await mkAsk(q); return r.closed ? "" : (r.answer ?? ""); };
-  return Promise.resolve(fn(ask)).finally(() => { if (!rl.closed) rl.close(); });
+  // Masked prompt for secrets: print the question, then mute keystroke echo so a
+  // pasted key never lands in terminal scrollback. Falls back to plain input if
+  // readline's internal writer isn't available.
+  const askSecret = async (q) => {
+    const orig = rl._writeToOutput;
+    if (typeof orig !== "function") return ask(q);
+    process.stdout.write(q);
+    rl._writeToOutput = () => {};                 // mute the prompt echo + keystrokes
+    try {
+      const r = await mkAsk("");
+      return r.closed ? "" : (r.answer ?? "");
+    } finally {
+      rl._writeToOutput = orig;
+      process.stdout.write("\n");                 // the muted Enter needs a visible newline
+    }
+  };
+  return Promise.resolve(fn(ask, askSecret)).finally(() => { if (!rl.closed) rl.close(); });
 }
 const runInstall = (cmd) => execSync(cmd, { stdio: "inherit" });
 
@@ -56,7 +71,7 @@ if (sub === "doctor") {
 }
 
 if (sub === "setup") {
-  await withAsker((ask) => runSetup({ ask, checkBin: undefined, runInstall, out: (m) => console.log(m) }));
+  await withAsker((ask, askSecret) => runSetup({ ask, askSecret, checkBin: undefined, runInstall, out: (m) => console.log(m) }));
   console.log(`\nSetup complete. Start the agent with:  contract-ops-agent`);
   console.log(`  (if that's "command not found", you're running from source — use`);
   console.log(`   node bin/contract-ops-agent.mjs, or run \`npm link\` in this repo once`);
@@ -66,32 +81,26 @@ if (sub === "setup") {
 
 // Default: start the agent. First run walks the wizard, then drops into the REPL.
 if (isFirstRun()) {
-  await withAsker((ask) => runSetup({ ask, runInstall, out: (m) => console.log(m) }));
+  await withAsker((ask, askSecret) => runSetup({ ask, askSecret, runInstall, out: (m) => console.log(m) }));
   console.log("\nStarting…\n");
 }
 
 const cfg = loadConfig() ?? {};
 applyAuth(cfg);
+if (cfg.auth?.mode === "claude-code" && process.env.ANTHROPIC_API_KEY) {
+  console.warn("note: ANTHROPIC_API_KEY is set in your environment — it overrides your Claude Code subscription (this bills the API, not your plan). Unset it to use the subscription.");
+}
 const workspace = resolve(flag("--workspace") ?? cfg.workspace ?? process.cwd());
-const model = flag("--model") ?? cfg.model;
+const provider = resolveProvider(cfg.model, cfg);       // cfg.model: "provider/model" ref or undefined → claude
+const model = flag("--model") ?? modelFromRef(cfg.model);
 
 const transcript = new Transcript(join(workspace, "transcripts"));
 
 console.log(renderPreflight(await preflight()));
+console.log(`provider:   ${provider.id}`);
 console.log(`workspace:  ${workspace}`);
 console.log(`transcript: ${transcript.path}`);
 console.log(`config:     ${join(configDir(), "config.json")}`);
 console.log(`(type /quit to exit)\n`);
 
-const session = newSessionState();
-
-await startRepl({
-  transcript,
-  options: (gatePrompter) =>
-    buildOptions({
-      workspace,
-      model,
-      systemPrompt: SYSTEM_PROMPT,
-      canUseTool: makeCanUseTool(session, gatePrompter, (e) => transcript.write(e)),
-    }),
-});
+await startRepl({ provider, workspace, systemPrompt: SYSTEM_PROMPT, model, transcript });

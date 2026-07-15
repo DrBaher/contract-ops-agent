@@ -5,11 +5,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { decide, makeCanUseTool, newSessionState, READ_ONLY, PREFIX } from "../src/gates.mjs";
-import { buildOptions, DISALLOWED_TOOLS, mcpServerEnv } from "../src/options.mjs";
+import { buildOptions, DISALLOWED_TOOLS } from "../src/providers/claude.mjs";
+import { mcpServerEnv } from "../src/mcp-client.mjs";
+import { makeInputQueue } from "../src/async-queue.mjs";
+import { makeOpenAIDriver } from "../src/providers/openai.mjs";
+import { resolveProvider, modelFromRef } from "../src/providers/index.mjs";
 import { assertEnclosure } from "../src/enclosure-assert.mjs";
 import { Transcript } from "../src/transcript.mjs";
 import { preflight, renderPreflight } from "../src/preflight.mjs";
-import { makeInputQueue, makeAsker } from "../src/repl.mjs";
+import { makeAsker } from "../src/repl.mjs";
 
 const t = (short) => `${PREFIX}${short}`;
 
@@ -253,4 +257,107 @@ test("makeAsker resolves to {closed} on readline close instead of throwing", asy
   assert.deepEqual(await p, { closed: true });
   // A question issued AFTER close must also resolve closed, not throw.
   assert.deepEqual(await ask("again> "), { closed: true });
+});
+
+// --- v0.3 provider abstraction (offline) ---
+
+test("P1: provider registry resolves built-ins, refs, and config endpoints", () => {
+  assert.equal(resolveProvider("claude").id, "claude");
+  assert.equal(resolveProvider("openai").id, "openai");
+  assert.equal(resolveProvider("openai/gpt-4o").id, "openai");
+  assert.equal(resolveProvider(undefined).id, "claude");            // default
+  assert.equal(modelFromRef("openai/gpt-4o"), "gpt-4o");
+  assert.equal(modelFromRef("openai/gpt-4o-mini-2026"), "gpt-4o-mini-2026");
+  assert.equal(modelFromRef("claude"), undefined);
+
+  // an OpenAI-compatible endpoint defined in config resolves with no new code
+  const cfg = { providers: { gemini: { baseUrl: "https://x/v1", apiKeyEnv: "GEMINI_API_KEY", defaultModel: "gemini-2.0" } } };
+  const g = resolveProvider("gemini/gemini-2.0", cfg);
+  assert.equal(g.id, "gemini");
+  assert.equal(g.defaultModel, "gemini-2.0");
+  assert.deepEqual(g.envKeys, ["GEMINI_API_KEY"]);
+
+  assert.throws(() => resolveProvider("mystery"), /unknown model provider/);          // no cfg
+  assert.throws(() => resolveProvider("mystery", { providers: {} }), /unknown model provider/);
+
+  // a config endpoint that SHADOWS a built-in id must error, not silently route
+  // to the wrong host (the HIGH audit finding)
+  assert.throws(
+    () => resolveProvider("openai/x", { providers: { openai: { baseUrl: "https://gw/v1" } } }),
+    /collides with the built-in/,
+  );
+  // empty model segment → undefined (not "")
+  assert.equal(modelFromRef("openai/"), undefined);
+  // a config entry without a baseUrl is not advertised as available
+  try { resolveProvider("mystery", { providers: { half: {} } }); assert.fail("should throw"); }
+  catch (e) { assert.doesNotMatch(e.message, /half/); }
+});
+
+test("O1: OpenAI driver maps MCP tools → function tools and normalizes tool calls", async () => {
+  // Stub client: echoes back a tool call, so we test the dialect mapping only.
+  const seen = {};
+  const client = {
+    chat: { completions: { create: async (req) => { seen.req = req; return {
+      choices: [{ message: { content: "hi", tool_calls: [
+        { id: "t1", type: "function", function: { name: "mcp__contract-ops__lint_contract", arguments: '{"path":"a.md"}' } },
+      ] } }],
+    }; } } },
+  };
+  const d = makeOpenAIDriver(client);
+  const exposed = [{ name: "mcp__contract-ops__lint_contract", description: "lint", inputSchema: { type: "object", properties: { path: { type: "string" } } } }];
+  const messages = [];
+  d.pushUser(messages, "lint a.md");
+  assert.deepEqual(messages[0], { role: "user", content: "lint a.md" });
+
+  const out = await d.infer({ system: "sp", tools: exposed, messages, model: "gpt-4o" });
+  // request shape: system prepended, tools as function type
+  assert.equal(seen.req.messages[0].role, "system");
+  assert.equal(seen.req.tools[0].type, "function");
+  assert.equal(seen.req.tools[0].function.name, "mcp__contract-ops__lint_contract");
+  assert.deepEqual(seen.req.tools[0].function.parameters, exposed[0].inputSchema);
+  // normalized output
+  assert.equal(out.text, "hi");
+  assert.deepEqual(out.toolCalls, [{ id: "t1", name: "mcp__contract-ops__lint_contract", input: { path: "a.md" } }]);
+
+  // tool results → one role:"tool" message each, error prefixed
+  const msgs = d.toolResultMessages([
+    { id: "t1", content: "findings...", isError: false },
+    { id: "t2", content: "nope", isError: true },
+  ]);
+  assert.deepEqual(msgs[0], { role: "tool", tool_call_id: "t1", content: "findings..." });
+  assert.match(msgs[1].content, /^ERROR: nope/);
+});
+
+test("O2: OpenAI driver tolerates malformed / non-object tool arguments (no throw)", async () => {
+  const mk = (args) => ({ chat: { completions: { create: async () => ({
+    choices: [{ message: { content: "", tool_calls: [
+      { id: "x", type: "function", function: { name: "mcp__contract-ops__suite_status", arguments: args } },
+    ] } }],
+  }) } } });
+  for (const args of ["not json{", "\"a string\"", "42", "[1,2]", "null"]) {
+    const out = await makeOpenAIDriver(mk(args)).infer({ system: "s", tools: [], messages: [], model: "m" });
+    assert.deepEqual(out.toolCalls[0].input, {}, `args ${args} should coerce to {}`);
+  }
+});
+
+test("O3: OpenAI driver accepts tool_calls that omit `type` (compatible endpoints)", async () => {
+  // Gemini/Grok/Ollama-style: tool_calls without a `type` field must still map.
+  const client = { chat: { completions: { create: async () => ({
+    choices: [{ message: { content: "", tool_calls: [
+      { id: "g1", function: { name: "mcp__contract-ops__lint_contract", arguments: '{"path":"x.md"}' } },
+    ] } }],
+  }) } } };
+  const d = makeOpenAIDriver(client);
+  const out = await d.infer({ system: "s", tools: [], messages: [], model: "m" });
+  assert.deepEqual(out.toolCalls, [{ id: "g1", name: "mcp__contract-ops__lint_contract", input: { path: "x.md" } }]);
+  assert.ok(out.assistantMessage.tool_calls, "assistant message keeps its tool_calls when calls were normalized");
+
+  // when NO tool_calls normalize, they're stripped from the assistant message so
+  // history doesn't wedge the next request
+  const empty = { chat: { completions: { create: async () => ({
+    choices: [{ message: { content: "hi", tool_calls: [{ id: "z" /* no function */ }] } }],
+  }) } } };
+  const out2 = await makeOpenAIDriver(empty).infer({ system: "s", tools: [], messages: [], model: "m" });
+  assert.deepEqual(out2.toolCalls, []);
+  assert.equal(out2.assistantMessage.tool_calls, undefined);
 });

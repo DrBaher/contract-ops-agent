@@ -7,9 +7,8 @@ import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { query } from "@anthropic-ai/claude-agent-sdk";
-
-import { buildOptions, resolveMcpServerPath } from "../src/options.mjs";
+import { claudeProvider } from "../src/providers/claude.mjs";
+import { resolveMcpServerPath } from "../src/mcp-client.mjs";
 import { makeCanUseTool, newSessionState, PREFIX } from "../src/gates.mjs";
 import { SYSTEM_PROMPT } from "../src/system-prompt.mjs";
 import { assertEnclosure } from "../src/enclosure-assert.mjs";
@@ -30,29 +29,30 @@ async function runLive({ prompt, decider = async () => true, mutateOptions, maxT
   let resultText = "";
   let breach = null;
 
-  const opts = buildOptions({
+  const canUseTool = makeCanUseTool(session, decider, (e) => gateEvents.push(e));
+  const sess = claudeProvider.startSession({
     workspace,
     systemPrompt: SYSTEM_PROMPT,
-    canUseTool: makeCanUseTool(session, decider, (e) => gateEvents.push(e)),
+    canUseTool,
     maxTurns,
+    _mutateOptions: mutateOptions, // e.g. L2 injects a foreign MCP server
   });
-  if (mutateOptions) mutateOptions(opts);
-
-  const q = query({ prompt, options: opts });
+  sess.send(prompt);
+  let verified = false;
   try {
-    for await (const m of q) {
-      if (m.type === "system" && m.subtype === "init") {
-        try { assertEnclosure(m); } catch (e) { breach = e; break; }
-      } else if (m.type === "assistant") {
-        for (const b of m.message?.content ?? []) {
-          if (b.type === "tool_use") toolUses.push({ name: b.name, input: b.input });
-        }
-      } else if (m.type === "result") {
-        resultText = String(m.result ?? "");
+    for await (const ev of sess.events()) {
+      if (ev.type === "enclosure") {
+        try { assertEnclosure({ tools: ev.tools }); verified = true; } catch (e) { breach = e; break; }
+      } else if (verified && ev.type === "tool_use") {
+        toolUses.push({ name: ev.name, input: ev.input });
+      } else if (ev.type === "turn_end") {
+        resultText = String(ev.meta?.text ?? "");
+        break; // single-turn tests
       }
     }
   } finally {
-    try { await q.close?.(); } catch { /* already closed */ }
+    try { await sess.interrupt(); } catch { /* already idle */ }
+    sess.end();
   }
   return { toolUses, resultText, gateEvents, breach, session };
 }
