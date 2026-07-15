@@ -80,13 +80,20 @@ export async function runSetup({ ask, askSecret = ask, env = process.env, cwd = 
   // ── Step 3/3 · Model & Authentication (credentials stay on this machine) ──
   out("Step 3/3 · Model & Authentication");
   out("  Which model provider should drive the agent?");
-  const pChoice = (await ask(
-    "  1) Anthropic Claude — a Claude API key, or your existing Claude Code subscription\n" +
-    "  2) OpenAI (GPT)     — your OpenAI API key\n" +
-    "  3) Gemini / Grok / DeepSeek / OpenRouter / Ollama — built-in endpoints, just add a key\n" +
-    "  4) Other endpoint   — any other OpenAI-compatible API (a proxy, a local server…)\n" +
-    "  Choose [1/2/3/4]: ",
-  )).trim();
+  out("  1) Anthropic Claude — a Claude API key, or your existing Claude Code subscription");
+  out("  2) OpenAI (GPT)     — your OpenAI API key");
+  out("  3) Gemini / Grok / DeepSeek / OpenRouter / Ollama — built-in endpoints, just add a key");
+  out("  4) Other endpoint   — any other OpenAI-compatible API (a proxy, a local server…)");
+  // Re-prompt on an unrecognized answer instead of silently defaulting to
+  // Claude — a fat-fingered choice shouldn't quietly pick the wrong provider.
+  // Empty (just Enter) is the recommended default (Claude).
+  let pChoice;
+  for (;;) {
+    pChoice = (await ask("  Choose [1/2/3/4, Enter=1]: ")).trim();
+    if (pChoice === "") { pChoice = "1"; break; }
+    if (["1", "2", "3", "4"].includes(pChoice)) break;
+    out(`  "${pChoice}" isn't one of 1–4 — please choose 1, 2, 3, or 4.`);
+  }
 
   let model, auth, providers;
   if (pChoice === "3") {

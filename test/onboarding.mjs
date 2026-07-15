@@ -338,3 +338,15 @@ test("D3: doctor validates signing config and fallback refs", async () => {
     assert.match(renderDoctor(diag3), /INVALID mode "yolo"/);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("S10: wizard re-prompts on an invalid provider choice (no silent default)", async () => {
+  const { env, dir } = tmpEnv();
+  try {
+    // workspace Enter, then a garbage provider choice, then a valid one (2=OpenAI), key, model
+    const out = [];
+    const ask = scriptAsk(["", "banana", "2", "sk-x", ""]);
+    const cfg = await runSetup({ ask, env, cwd: "/c", checkBin: async () => true, out: (m) => out.push(m) });
+    assert.equal(cfg.model, "openai/gpt-4o", "must land on the LATER valid choice, not default to claude");
+    assert.ok(out.some((l) => /isn't one of 1–4/.test(l)), "should have flagged the bad choice");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
