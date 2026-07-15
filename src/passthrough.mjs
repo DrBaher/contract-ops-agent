@@ -15,6 +15,7 @@ export async function runTool({ workspace, name, args = {}, confirm, out = (s) =
       out("tools:");
       for (const t of mcp.tools) out(`  ${t.name.padEnd(24)} ${String(t.description ?? "").split("\n")[0]}`);
       out('\nrun one:  contract-ops-agent tool <name> \'{"param": "value"}\'');
+      out("(contract-ops tools only — signing is not reachable here; use sign-cli directly)");
       return 0;
     }
     if (!mcp.tools.some((t) => t.name === name)) {

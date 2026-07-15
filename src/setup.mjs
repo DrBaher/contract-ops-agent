@@ -180,6 +180,11 @@ export async function runSetup({ ask, askSecret = ask, env = process.env, cwd = 
   out('    "fill template.md with client_name Acme and effective_date 2026-09-01"');
   out('    "compare v1.md and v2.md"');
   out("The agent reads files freely, but always asks your OK before it writes");
-  out("a file or runs anything beyond a read — and it can never sign on your behalf.");
+  out("a file or runs anything beyond a read. Signing stays impossible unless you");
+  out("later opt in explicitly (signing.mode in config + --enable-signing at launch).");
+  out("");
+  out("Optional extras (config.json, validated by `contract-ops-agent doctor`):");
+  out('  "fallbacks": ["gemini/gemini-2.5-flash", "claude"]   fail over when a provider dies');
+  out('  "signing":  {"mode": "prepare"}                      see docs/sign-mount-scope.md');
   return cfg;
 }

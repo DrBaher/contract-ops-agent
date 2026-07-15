@@ -25,12 +25,18 @@ if (argv.includes("--help") || argv.includes("-h")) {
 contract-ops suite. No shell, no file access, no web, no signing.
 
 Usage:
-  contract-ops-agent [--workspace <dir>] [--model <model>]   start the agent (first run: setup wizard)
+  contract-ops-agent [--workspace <dir>] [--model <model>] [--enable-signing]
+                                                             start the agent (first run: setup wizard)
   contract-ops-agent --resume [last|<transcript.jsonl>]      continue a prior conversation
   contract-ops-agent setup                                   (re)run the setup wizard
-  contract-ops-agent doctor                                  check environment; offer to install what's missing
-  contract-ops-agent tool [<name> ['{json args}']]           list tools, or run one directly (no model)
-  contract-ops-agent --enable-signing                        activate config's signing.mode (prepare|full) this session
+  contract-ops-agent doctor                                  check environment, auth, signing + fallback config;
+                                                             migrates old configs, offers to install missing CLIs
+  contract-ops-agent tool [<name> ['{json args}']]           list tools, or run one directly (no model;
+                                                             contract-ops tools only — use sign-cli itself for signing)
+
+--enable-signing activates the signing.mode set in config (prepare | full) for
+this session; without the flag signing stays off. Fallback chains are the
+config "fallbacks" list — see docs/providers.md.
 
 Auth: bring your own — a Claude API key or Claude Code login, an OpenAI key,
 or a key for any preset/compatible endpoint (see docs/providers.md).`);

@@ -37,6 +37,9 @@ docker run -it --rm \
 
 The named `contract-ops-config` volume persists your config and stored keys
 across runs; subcommands work the same way (`… ghcr.io/drbaher/contract-ops-agent doctor`).
+On Linux, the container runs as uid 1001 — if your bind-mounted workspace is
+owned by another uid, add `--user "$(id -u):$(id -g)"` so transcripts and PDF
+outputs can be written.
 
 The **first run** walks a short wizard — it checks which contract-ops CLIs are
 installed (and offers to install any that are missing), picks your workspace
@@ -47,10 +50,11 @@ goes straight to the REPL. Config is saved under
 `config.json` or a transcript).
 
 ```
-contract-ops-agent [--workspace <dir>] [--model <model>]   start the agent
+contract-ops-agent [--workspace <dir>] [--model <model>] [--enable-signing]   start the agent
 contract-ops-agent --resume [last|<transcript.jsonl>]      continue a prior conversation
 contract-ops-agent setup                                   (re)run the setup wizard
-contract-ops-agent doctor                                  check environment + auth; migrate old configs
+contract-ops-agent doctor                                  check environment, auth, signing + fallback
+                                                           config; migrate old configs; install missing CLIs
 contract-ops-agent tool [<name> ['{json}']]                list tools, or run one directly (no model)
 ```
 
@@ -66,6 +70,8 @@ contract-ops-agent` runs one scripted session.
 `tool` is the model-free path: `contract-ops-agent tool lint_contract
 '{"path":"agreement.md"}'` drives one CLI through the same MCP mount — same
 path confinement, same sign guard, and consequential tools still ask first.
+(Contract-ops tools only — signing is never reachable through `tool`; use
+sign-cli itself.)
 
 The contract-ops CLIs must be installed (the MCP server shells out to them);
 `doctor` and the first-run wizard tell you which are missing and can install them.
@@ -92,6 +98,18 @@ The model is a config choice (`model: "provider/model"` ref, wizard step 3):
 The harness implements no login flow of its own and never handles your
 credentials beyond storing a key you paste (masked) into setup. A missing key
 is caught at startup with a pointer to setup, not a mid-session crash.
+
+**Fallback chains:** list refs in config and the agent fails over
+mid-conversation when a provider dies (terminal errors only — rate limits
+just retry), replaying your unanswered message with the conversation
+re-seeded:
+
+```json5
+{ "model": "openai/gpt-4o", "fallbacks": ["gemini/gemini-2.5-flash", "claude"] }
+```
+
+Details (skip rules, context carrying, claude caveat): `docs/providers.md`.
+`doctor` validates every fallback ref and its key up front.
 
 ## The enclosure
 
@@ -148,7 +166,7 @@ under `transcripts/` (git-ignored).
 ## Tests
 
 ```bash
-npm test                  # unit + onboarding + resilience — offline, no API usage
+npm test                  # unit, onboarding, resilience, fallback, signing — offline, no API usage
 npm run test:loop         # the raw loop over the real CLIs (stubbed model, offline)
 npm run test:live         # real Claude sessions + real CLIs (uses your quota)
 npm run test:live:openai  # real OpenAI requests through the loop (needs OPENAI_API_KEY)

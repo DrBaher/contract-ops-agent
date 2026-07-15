@@ -307,3 +307,34 @@ test("S9: wizard keyless custom endpoint records keyOptional so startup doesn't 
     assert.equal(r.provider.id, "locallm");
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("D3: doctor validates signing config and fallback refs", async () => {
+  const { env, dir } = tmpEnv();
+  try {
+    const clis = { a: { bin: "abin", install: "npm i -g a" } };
+    const checkBin = async (bin) => bin !== "sign"; // everything but sign-cli present
+
+    // valid signing mode but sign-cli missing → flagged
+    saveConfig({ model: "claude", signing: { mode: "prepare" }, fallbacks: ["gemini", "nosuch/x"] }, env);
+    const diag = await diagnose({ clis, checkBin, env: { ...env } });
+    assert.equal(diag.signing.mode, "prepare");
+    assert.equal(diag.signing.signBin, false);
+    assert.match(renderDoctor(diag), /sign-cli is MISSING/);
+    // fallback refs: gemini resolves but has no key; nosuch/x is unknown
+    assert.equal(diag.fallbacks.length, 2);
+    assert.equal(diag.fallbacks[0].ok, false);
+    assert.match(diag.fallbacks[0].problem, /no key.*GEMINI_API_KEY/);
+    assert.match(diag.fallbacks[1].problem, /unknown model provider/);
+    assert.match(renderDoctor(diag), /Fallbacks: {3}PROBLEMS/);
+
+    // healthy: sign-cli present, fallback key in env
+    const diag2 = await diagnose({ clis, checkBin: async () => true, env: { ...env, GEMINI_API_KEY: "sk" } });
+    assert.match(renderDoctor(diag2), /prepare \(config\) — activates when you launch with --enable-signing/);
+    assert.match(renderDoctor(diag2), /nosuch\/x: unknown/); // still reported
+
+    // invalid mode string → flagged, not crashed
+    saveConfig({ model: "claude", signing: { mode: "yolo" } }, env);
+    const diag3 = await diagnose({ clis, checkBin: async () => true, env: { ...env } });
+    assert.match(renderDoctor(diag3), /INVALID mode "yolo"/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
