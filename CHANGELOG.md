@@ -2,6 +2,36 @@
 
 All notable changes to contract-ops-agent. Dates are release dates.
 
+## 0.8.0 — 2026-07-15
+
+**Security** (found by an adversarial review of the signing surface)
+- **RCE fix (critical):** the Claude sign mount interpolated the workspace
+  path into `sh -c` via `JSON.stringify`, which does not escape `$(…)` or
+  backticks — a workspace like `/tmp/wk$(…)` executed code at session start.
+  The path is now a positional shell parameter, never parsed as code.
+- **Signing-gate hardening (high):** the `document` act (one-shot seal of any
+  file) uses `input_path`, which the gate didn't read — the typed challenge
+  collapsed to the generic word "document" and the gate mis-said "no target".
+  Target resolution now covers the real sign-cli params; the challenge is the
+  full target (basenames collide); an empty-string field can't mask a real
+  one; and a signing act with no resolvable target is denied.
+- A signing act can only be approved from an **interactive TTY** — piped input
+  can never confirm a signature.
+- Defense-in-depth: the `run` sign-guard normalizes casing/whitespace;
+  `convert_to_pdf` approval keys on the exact output file, not the directory.
+
+**Signing on every provider**
+- Signing works on all providers with a **current sign-cli**; the harness adds
+  `--capability tools` (no stray resource tools) and blocks startup until the
+  sign server connects. A too-old sign-cli aborts loudly ("no sign tools
+  mounted") instead of running a session that only looks signing-capable.
+
+**Other**
+- MCP mounts connect concurrently (faster signing-mode startup).
+- Platform support stated (macOS/Linux; Windows via WSL/Docker).
+- Added `docs/beta-onboarding.md` and backfilled this changelog.
+- First Claude live-suite run since v0.3 (L1–L12 green).
+
 ## 0.7.0 — 2026-07-15
 
 **Fixes**
