@@ -1,6 +1,6 @@
 {
   "name": "contract-ops-agent",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Contract work in an enclosure: a Claude Agent SDK agent whose only tools are the contract-ops suite — no shell, no filesystem, no signing.",
   "type": "module",
   "scripts": {
