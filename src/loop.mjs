@@ -84,14 +84,24 @@ export function startLoopSession({ workspace, systemPrompt, model, canUseTool, d
           p,
           new Promise((_, reject) => setTimeout(() => reject(new Error(`${what} did not connect within ${CONNECT_TIMEOUT_MS / 1000}s`)), CONNECT_TIMEOUT_MS).unref?.()),
         ]);
-        try {
-          clients.push({ prefix: PREFIX, client: await withTimeout(_connect(workspace), "the contract-ops server") });
-          for (const m of extraMounts) {
-            clients.push({ prefix: m.prefix, client: await withTimeout(m.connect(), `the ${m.prefix} server`) });
+        {
+          // Connect all mounts concurrently (order in `clients` is preserved
+          // for stable tool ordering) — signing-mode startup no longer pays
+          // for contract-ops + sign sequentially. allSettled (not all) so a
+          // client that connected while a sibling failed is still captured and
+          // closed, never leaked.
+          const specs = [
+            { prefix: PREFIX, connect: () => _connect(workspace), what: "the contract-ops server" },
+            ...extraMounts.map((m) => ({ prefix: m.prefix, connect: m.connect, what: `the ${m.prefix} server` })),
+          ];
+          const settled = await Promise.allSettled(specs.map((sp) => withTimeout(sp.connect(), sp.what)));
+          const failure = settled.find((r) => r.status === "rejected");
+          if (failure) {
+            for (const r of settled) if (r.status === "fulfilled") await r.value.close().catch(() => {});
+            yield { type: "error", message: `could not start a tool server: ${describeError(failure.reason)}` };
+            return;
           }
-        } catch (e) {
-          yield { type: "error", message: `could not start a tool server: ${describeError(e)}` };
-          return;
+          specs.forEach((sp, i) => clients.push({ prefix: sp.prefix, client: settled[i].value }));
         }
         const routeByName = new Map(); // prefixed name -> { client, raw }
         const exposed = [];

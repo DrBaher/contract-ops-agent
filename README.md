@@ -76,6 +76,12 @@ sign-cli itself.)
 The contract-ops CLIs must be installed (the MCP server shells out to them);
 `doctor` and the first-run wizard tell you which are missing and can install them.
 
+## Platform support
+
+macOS and Linux. The agent shells out to the contract-ops CLIs and (in signing
+modes) spawns the sign server via `/bin/sh`, so a POSIX shell is assumed;
+Windows is supported only through WSL or the Docker image.
+
 ## Providers & auth — bring your own
 
 The model is a config choice (`model: "provider/model"` ref, wizard step 3):
