@@ -162,11 +162,10 @@ and still fails on anything unexpected, and the `run` escape hatch keeps
 refusing sign mutations regardless. A signing act can only be approved from an
 interactive terminal — piped/scripted input can never confirm a signature.
 
-**Provider support:** signing modes currently work on the **loop providers**
-(OpenAI and OpenAI-compatible/preset endpoints), not on the `claude` provider —
-the Agent SDK's strict MCP client rejects the current sign-cli's tool schema.
-The agent refuses `--enable-signing` on `claude` with that guidance; switch to
-a loop provider for signing.
+Signing works on every provider, but needs a **current sign-cli** — older
+builds expose an MCP tool schema the Agent SDK rejects, and the agent then
+aborts with "no sign tools mounted" rather than run a session that only looks
+signing-capable.
 
 A provider failure never loses your session: transient errors (rate limits,
 network, 5xx) retry with backoff, anything else ends the *turn* with a clear

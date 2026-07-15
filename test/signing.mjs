@@ -113,11 +113,13 @@ test("S1: serve args + double opt-in", () => {
   // BOTH modes pass the --tool whitelist so mount and enclosure assertion can
   // never drift (a sign-cli upgrade adding tools must not breach full mode).
   const full = signServeArgs("full");
+  assert.ok(full.join(" ").includes("--capability tools"), "must advertise only the tools surface");
   assert.ok(!full.includes("--read-only"), "full mode must not be read-only");
   assert.equal(full.filter((a) => a === "--tool").length, allowedSignTools("full").length);
   assert.ok(full.includes("sign"), "full mode whitelist includes the signing act");
   const prep = signServeArgs("prepare");
-  assert.equal(prep[2], "--read-only");
+  assert.ok(prep.includes("--read-only"), "prepare mode must be read-only");
+  assert.ok(prep.join(" ").includes("--capability tools"));
   assert.ok(prep.filter((a) => a === "--tool").length === allowedSignTools("prepare").length);
   assert.ok(!allowedSignTools("prepare").includes("sign"));
 

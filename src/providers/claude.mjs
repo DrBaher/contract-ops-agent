@@ -50,6 +50,11 @@ export function buildOptions({ workspace, canUseTool, systemPrompt, model, maxTu
           command: "/bin/sh",
           args: ['-c', 'cd "$0" && exec sign "$@"', workspace, ...signServeArgs(signingMode)],
           env: signServerEnv(),
+          // Block startup until the sign server connects and always include its
+          // tools, so the enclosure assertion sees them on the first init
+          // message rather than a still-pending mount (which would look like
+          // "no sign tools" and abort). Requires a spec-compliant sign-cli.
+          alwaysLoad: true,
         },
       } : {}),
     },

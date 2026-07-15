@@ -24,8 +24,8 @@ export function assertEnclosure(initMessage, signingMode = "off") {
   if (signingMode !== "off" && !tools.some((n) => n.startsWith(SIGN_PREFIX))) {
     throw new Error(
       `Signing mode "${signingMode}" is active but no sign tools mounted — the sign server did not register. ` +
-      `Signing modes require a sign-cli whose MCP schema the provider accepts; on the Claude/Agent-SDK provider this needs a spec-compliant sign-cli. ` +
-      `Use a loop provider (e.g. openai/…) for signing, or update sign-cli.`,
+      `Check that sign-cli is installed and current (older builds expose an MCP schema the Agent SDK rejects). ` +
+      `Update sign-cli, or set signing.mode to off.`,
     );
   }
   return tools.length;

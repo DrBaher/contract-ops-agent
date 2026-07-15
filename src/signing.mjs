@@ -41,7 +41,10 @@ export function allowedSignTools(mode) {
 // that adds tools cannot surprise-fail the session). prepare additionally
 // passes --read-only, blocking the signing act server-side.
 export function signServeArgs(mode) {
-  const args = ["mcp", "serve"];
+  // --capability tools: advertise ONLY the tools surface, so the mount never
+  // exposes sign-cli's MCP resources/prompts (which the Agent SDK would turn
+  // into extra resource-reader tools that breach the enclosure assertion).
+  const args = ["mcp", "serve", "--capability", "tools"];
   if (mode === "prepare") args.push("--read-only", "true");
   if (mode === "prepare" || mode === "full") {
     for (const t of allowedSignTools(mode)) args.push("--tool", t);
