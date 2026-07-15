@@ -1,6 +1,12 @@
 # Signing from the agent — design options for a sign-cli mount
 
-**Status:** DRAFT for decision · 2026-07-15 · **nothing here is implemented**
+**Status:** DECIDED & IMPLEMENTED (v0.6, 2026-07-15) — the user chose to ship
+*both* B and C as user-selectable modes: `signing.mode = "prepare"` (≈C,
+adapted: sign-cli's MCP has no create/send tools, so the middle mode is
+tracking + PDF preparation, least-privilege enforced server-side via `--tool`)
+and `"full"` (=B, every signing act behind a typed-challenge gate). Double
+opt-in (config + `--enable-signing`), default off. The analysis below is kept
+as the decision record.
 
 The harness's core promise is *"signing is unreachable by design"*: the loop
 ends at "ready for signature" and hands off to the human's sign-cli flow. This

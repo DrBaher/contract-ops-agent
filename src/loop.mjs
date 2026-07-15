@@ -58,7 +58,11 @@ function abortableSleep(ms, signal) {
 //   async infer({ system, tools, messages, model, signal }) -> { text, toolCalls: [{id,name,input}], assistantMessage }
 //   toolResultMessages(results: [{id, content, isError}]) -> native message(s) (array)
 //   repairHistory?(messages)                     make history valid after an abnormal turn end
-export function startLoopSession({ workspace, systemPrompt, model, canUseTool, driver, maxTurns = DEFAULT_MAX_TURNS, retry = DEFAULT_RETRY, seed = null, _connect = connectMcp }) {
+// `extraMounts` adds further MCP servers ([{prefix, connect}] — e.g. sign-cli
+// in a signing mode); their tools are exposed under their own prefix and calls
+// are routed to the owning client. A mount that fails to connect fails the
+// session CLOSED (an error event, then return) — never a silent partial mount.
+export function startLoopSession({ workspace, systemPrompt, model, canUseTool, driver, maxTurns = DEFAULT_MAX_TURNS, retry = DEFAULT_RETRY, seed = null, extraMounts = [], _connect = connectMcp }) {
   const inbox = makeInputQueue();
   const messages = [];
   // Resume support: seed the history with a prior conversation's user/assistant
@@ -71,21 +75,27 @@ export function startLoopSession({ workspace, systemPrompt, model, canUseTool, d
     end() { inbox.close(); },
     async interrupt() { turnAbort?.abort(); },
     async *events() {
-      let mcp = null;
+      const clients = [];
       try {
         try {
-          mcp = await _connect(workspace);
+          clients.push({ prefix: PREFIX, client: await _connect(workspace) });
+          for (const m of extraMounts) {
+            clients.push({ prefix: m.prefix, client: await m.connect() });
+          }
         } catch (e) {
-          yield { type: "error", message: `could not start the contract-ops tool server: ${describeError(e)}` };
+          yield { type: "error", message: `could not start a tool server: ${describeError(e)}` };
           return;
         }
-        const rawByPrefixed = new Map();
-        const exposed = mcp.tools.map((t) => {
-          const name = PREFIX + t.name;
-          rawByPrefixed.set(name, t.name);
-          return { name, description: t.description, inputSchema: t.inputSchema };
-        });
-        // The exposed set is exactly the contract-ops tools (the REPL/test
+        const routeByName = new Map(); // prefixed name -> { client, raw }
+        const exposed = [];
+        for (const { prefix, client } of clients) {
+          for (const t of client.tools) {
+            const name = prefix + t.name;
+            routeByName.set(name, { client, raw: t.name });
+            exposed.push({ name, description: t.description, inputSchema: t.inputSchema });
+          }
+        }
+        // The exposed set is exactly the mounted servers' tools (the REPL/test
         // asserts on it). Nothing else can exist — we never add another tool.
         yield { type: "enclosure", tools: exposed.map((t) => t.name) };
 
@@ -141,10 +151,10 @@ export function startLoopSession({ workspace, systemPrompt, model, canUseTool, d
                 const outcome = await canUseTool(call.name, call.input);
                 if (outcome.behavior === "allow") {
                   yield { type: "tool_use", name: call.name, input: call.input }; // only allowed → executed
-                  const raw = rawByPrefixed.get(call.name);
-                  if (!raw) { results.push({ id: call.id, content: `"${call.name}" is not a contract-ops tool`, isError: true }); continue; }
+                  const route = routeByName.get(call.name);
+                  if (!route) { results.push({ id: call.id, content: `"${call.name}" is not a mounted tool`, isError: true }); continue; }
                   try {
-                    const r = await mcp.call(raw, outcome.updatedInput ?? call.input);
+                    const r = await route.client.call(route.raw, outcome.updatedInput ?? call.input);
                     results.push({ id: call.id, content: mcpResultText(r), isError: r.isError === true });
                   } catch (e) {
                     // A dead/crashed MCP subprocess fails the CALL, not the
@@ -166,7 +176,7 @@ export function startLoopSession({ workspace, systemPrompt, model, canUseTool, d
           yield { type: "turn_end", meta };
         }
       } finally {
-        await mcp?.close();
+        for (const { client } of clients) await client.close();
       }
     },
   };

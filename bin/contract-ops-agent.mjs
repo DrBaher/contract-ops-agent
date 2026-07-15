@@ -11,6 +11,7 @@ import { configState, configPath, applyAuth, configDir, migrateConfig } from "..
 import { runSetup } from "../src/setup.mjs";
 import { diagnose, renderDoctor, installPlan } from "../src/doctor.mjs";
 import { runTool } from "../src/passthrough.mjs";
+import { resolveSigningMode } from "../src/signing.mjs";
 
 const argv = process.argv.slice(2);
 const sub = argv[0] && !argv[0].startsWith("-") ? argv[0] : null;
@@ -29,6 +30,7 @@ Usage:
   contract-ops-agent setup                                   (re)run the setup wizard
   contract-ops-agent doctor                                  check environment; offer to install what's missing
   contract-ops-agent tool [<name> ['{json args}']]           list tools, or run one directly (no model)
+  contract-ops-agent --enable-signing                        activate config's signing.mode (prepare|full) this session
 
 Auth: bring your own — a Claude API key or Claude Code login, an OpenAI key,
 or a key for any preset/compatible endpoint (see docs/providers.md).`);
@@ -174,8 +176,20 @@ console.log(`transcript: ${transcript.path}`);
 console.log(`config:     ${join(configDir(), "config.json")}`);
 console.log(`(type /help for commands, /quit to exit)\n`);
 
+// Signing modes: double opt-in (config signing.mode AND --enable-signing).
+let signingMode = "off";
+try {
+  const s = resolveSigningMode(cfg, argv);
+  signingMode = s.mode;
+  if (s.warning) console.warn(`note: ${s.warning}`);
+  if (signingMode !== "off") console.log(`signing:    ${signingMode} — sign-cli mounted (${signingMode === "prepare" ? "tracking + PDF preparation; the signing act is impossible" : "INCLUDES the signing act; each one requires typed approval"})`);
+} catch (e) {
+  console.error(e.message);
+  process.exit(1);
+}
+
 await startRepl({
-  provider, workspace, model, transcript, resume,
+  provider, workspace, model, transcript, resume, signingMode,
   systemPromptFor: buildSystemPrompt,
   prepare: (ref) => prepareModel(ref, cfg),
   knownProviders: knownProviderIds(cfg),

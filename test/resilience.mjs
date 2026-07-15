@@ -165,7 +165,7 @@ test("MCP connect failure yields a clean error event and ends the session", asyn
   for await (const ev of session.events()) events.push(ev);
   assert.equal(events.length, 1);
   assert.equal(events[0].type, "error");
-  assert.match(events[0].message, /could not start the contract-ops tool server.*ENOENT/);
+  assert.match(events[0].message, /could not start a tool server.*ENOENT/);
 });
 
 test("maxTurns emits a notice instead of silently truncating", async () => {

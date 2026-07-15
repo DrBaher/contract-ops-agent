@@ -3,6 +3,8 @@
 // same as any loop provider: the model only ever sees the contract-ops tools.
 import OpenAI from "openai";
 import { startLoopSession } from "../loop.mjs";
+import { connectSign } from "../mcp-client.mjs";
+import { SIGN_PREFIX } from "../signing.mjs";
 
 function safeJson(s) {
   try {
@@ -103,7 +105,10 @@ export function makeOpenAIProvider({ id = "openai", apiKeyEnv = "OPENAI_API_KEY"
     envKeys: [apiKeyEnv],
     keyOptional, // local endpoints (Ollama…) run without a key
     defaultModel,
-    startSession({ workspace, systemPrompt, model, canUseTool, maxTurns, seed }) {
+    startSession({ workspace, systemPrompt, model, canUseTool, maxTurns, seed, signingMode = "off" }) {
+      const extraMounts = signingMode !== "off"
+        ? [{ prefix: SIGN_PREFIX, connect: () => connectSign(workspace, signingMode) }]
+        : [];
       const client = new OpenAI({
         // The SDK refuses an absent key even where the endpoint doesn't need
         // one — send a placeholder for key-optional (local) endpoints.
@@ -111,7 +116,7 @@ export function makeOpenAIProvider({ id = "openai", apiKeyEnv = "OPENAI_API_KEY"
         ...(baseURL ? { baseURL } : {}),
       });
       const driver = makeOpenAIDriver(client);
-      return startLoopSession({ workspace, systemPrompt, model: model ?? defaultModel, canUseTool, maxTurns, driver, seed });
+      return startLoopSession({ workspace, systemPrompt, model: model ?? defaultModel, canUseTool, maxTurns, driver, seed, extraMounts });
     },
   };
 }

@@ -118,7 +118,7 @@ function turnFooter(meta, toolCount) {
 // /model switching; a switch ends the session and starts a fresh one — context
 // resets, the enclosure is re-verified. `systemPromptFor(providerId)` supplies
 // the (possibly provider-specific) system prompt for each session.
-export async function startRepl({ provider, workspace, systemPromptFor, model, transcript, prepare = null, knownProviders = [], resume = null, fallbacks = [], input = process.stdin, output = process.stdout }) {
+export async function startRepl({ provider, workspace, systemPromptFor, model, transcript, prepare = null, knownProviders = [], resume = null, fallbacks = [], signingMode = "off", input = process.stdin, output = process.stdout }) {
   const rl = readline.createInterface({ input, output });
   const ask = makeAsker(rl);
   const spinner = makeSpinner(output);
@@ -126,11 +126,18 @@ export async function startRepl({ provider, workspace, systemPromptFor, model, t
   // A pending gate question registers its AbortController here so SIGINT can
   // cancel it (→ declined, no approval recorded) instead of deadlocking.
   let activeGateAbort = null;
-  const gatePrompter = async (_toolName, _input, detail) => {
+  const gatePrompter = async (_toolName, _input, detail, challenge) => {
     const ctl = new AbortController();
     activeGateAbort = ctl;
     spinner.stop(); // the question owns the terminal while it's pending
     try {
+      if (challenge) {
+        // Signing act: consent means TYPING the target back — y/N is not
+        // enough for a legally meaningful, irreversible action.
+        const { answer, aborted, closed } = await ask(`\n⚖ gate: ${detail}\n  type "${challenge}" to approve (anything else declines): `, ctl.signal);
+        if (aborted || closed) return false;
+        return String(answer).trim() === challenge;
+      }
       const { answer, aborted, closed } = await ask(`\n⚖ gate: ${detail}\n  approve? [y/N] `, ctl.signal);
       if (aborted || closed) return false;
       return /^y(es)?$/i.test(String(answer).trim());
@@ -139,7 +146,7 @@ export async function startRepl({ provider, workspace, systemPromptFor, model, t
       spinner.start(); // the turn is still running
     }
   };
-  const canUseTool = makeCanUseTool(newSessionState(), gatePrompter, (e) => transcript.write(e));
+  const canUseTool = makeCanUseTool(newSessionState(signingMode), gatePrompter, (e) => transcript.write(e));
 
   let cur = { provider, model };
   const refOf = (c) => c.provider.id + (c.model ? `/${c.model}` : "");
@@ -204,7 +211,7 @@ export async function startRepl({ provider, workspace, systemPromptFor, model, t
   try {
     while (pending !== null) {
       const session = cur.provider.startSession({
-        workspace, systemPrompt: systemPromptFor(cur.provider.id), model: cur.model, canUseTool,
+        workspace, systemPrompt: systemPromptFor(cur.provider.id, signingMode), model: cur.model, canUseTool, signingMode,
         ...(resumeInfo ? { seed: resumeInfo.seed, resume: resumeInfo.sessionId ?? undefined } : {}),
       });
       resumeInfo = null;
@@ -236,9 +243,9 @@ export async function startRepl({ provider, workspace, systemPromptFor, model, t
             continue;
           }
           if (ev.type === "enclosure") {
-            const n = assertEnclosure({ tools: ev.tools });
+            const n = assertEnclosure({ tools: ev.tools }, signingMode);
             verified = true;
-            output.write(`[enclosure verified: ${n} contract-ops tools, nothing else]\n`);
+            output.write(`[enclosure verified: ${n} tools (contract-ops${signingMode !== "off" ? ` + sign:${signingMode}` : ""}), nothing else]\n`);
             transcript.write({ type: "init", tools: ev.tools, ...(ev.sessionId ? { sessionId: ev.sessionId } : {}) });
             spinner.start();
             continue;

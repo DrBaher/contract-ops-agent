@@ -43,6 +43,55 @@ export async function connectMcp(workspace) {
   };
 }
 
+// Env for sign-cli's MCP server: same least-privilege allowlist as the suite
+// CLIs, plus sign-cli's own SIGN_* configuration variables (profiles, tokens).
+export function signServerEnv() {
+  const allow = ["PATH", "HOME", "TMPDIR", "TEMP", "TMP", "LANG", "LC_ALL", "LC_CTYPE", "USER", "SHELL", "SystemRoot"];
+  const env = {};
+  for (const k of allow) if (process.env[k] !== undefined) env[k] = process.env[k];
+  for (const k of Object.keys(process.env)) if (k.startsWith("SIGN_")) env[k] = process.env[k];
+  return env;
+}
+
+// Mount sign-cli's own MCP server (signing modes — see src/signing.mjs).
+// cwd = workspace so sign's cwd-relative DB (./data/sign.db) is the same one
+// the human's sign-cli sees when run in the workspace.
+export async function connectSign(workspace, mode) {
+  if (!workspace) throw new Error("workspace is required");
+  const { signServeArgs } = await import("./signing.mjs");
+  const transport = new StdioClientTransport({
+    command: "sign",
+    args: signServeArgs(mode),
+    cwd: workspace,
+    env: signServerEnv(),
+  });
+  const client = new Client({ name: "contract-ops-agent", version: "0.5.0" }, { capabilities: {} });
+  try {
+    await client.connect(transport);
+    // sign-cli's catalog declares one outputSchema with type "array"
+    // (signer_list), which the SDK's strict tools/list validator rejects —
+    // and the rejection wedges the pending request. Fetch the list with a
+    // permissive schema instead; inputSchemas pass through untouched.
+    const { z } = await import("zod");
+    const res = await client.request(
+      { method: "tools/list", params: {} },
+      z.looseObject({ tools: z.array(z.any()) }),
+    );
+    return {
+      tools: res.tools,
+      async call(name, args) {
+        return client.callTool({ name, arguments: args ?? {} });
+      },
+      async close() {
+        try { await client.close(); } catch { /* already closing */ }
+      },
+    };
+  } catch (e) {
+    try { await client.close(); } catch { /* not connected */ }
+    throw e;
+  }
+}
+
 // Flatten an MCP tool result's content blocks to a single text string for the
 // model. Errors are surfaced as text (the caller sets is_error separately).
 export function mcpResultText(result) {

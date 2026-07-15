@@ -9,8 +9,9 @@
 // built-ins, canUseTool (the gate) denies anything not mcp__contract-ops__*, and
 // the startup assertion (in the REPL) refuses to run on a dirty tool list.
 import { query } from "@anthropic-ai/claude-agent-sdk";
-import { resolveMcpServerPath, mcpServerEnv } from "../mcp-client.mjs";
+import { resolveMcpServerPath, mcpServerEnv, signServerEnv } from "../mcp-client.mjs";
 import { makeInputQueue } from "../async-queue.mjs";
+import { signServeArgs } from "../signing.mjs";
 
 export const DISALLOWED_TOOLS = [
   "Bash", "Read", "Write", "Edit", "Glob", "Grep", "WebSearch", "WebFetch",
@@ -26,7 +27,7 @@ export const DISALLOWED_TOOLS = [
 
 // The Agent SDK enclosure config. No `allowedTools`: it auto-approves before
 // canUseTool fires and would bypass the confirmation gates.
-export function buildOptions({ workspace, canUseTool, systemPrompt, model, maxTurns = 100, resume }) {
+export function buildOptions({ workspace, canUseTool, systemPrompt, model, maxTurns = 100, resume, signingMode = "off" }) {
   if (!workspace) throw new Error("workspace is required");
   return {
     ...(resume ? { resume } : {}), // SDK session id — resumes the conversation server-side
@@ -36,6 +37,17 @@ export function buildOptions({ workspace, canUseTool, systemPrompt, model, maxTu
         args: [resolveMcpServerPath()],
         env: mcpServerEnv(workspace),
       },
+      // Signing modes mount sign-cli's own MCP server (least-privilege args
+      // per mode). The SDK config has no cwd field, and sign's DB is
+      // cwd-relative — spawn via sh so it runs in the workspace, sharing the
+      // DB with the human's sign-cli.
+      ...(signingMode !== "off" ? {
+        sign: {
+          command: "/bin/sh",
+          args: ["-c", `cd ${JSON.stringify(workspace)} && exec sign ${signServeArgs(signingMode).map((a) => JSON.stringify(a)).join(" ")}`],
+          env: signServerEnv(),
+        },
+      } : {}),
     },
     strictMcpConfig: true,
     disallowedTools: [...DISALLOWED_TOOLS],
@@ -65,8 +77,8 @@ export const claudeProvider = {
   // Start a session and return a normalized Session the REPL/tests can drive.
   // `canUseTool` is the gate (makeCanUseTool result). `_mutateOptions` is a
   // test hook to tamper with the SDK options (e.g. inject a foreign MCP server).
-  startSession({ workspace, systemPrompt, model, canUseTool, maxTurns, resume, _mutateOptions }) {
-    const options = buildOptions({ workspace, canUseTool, systemPrompt, model, maxTurns, resume });
+  startSession({ workspace, systemPrompt, model, canUseTool, maxTurns, resume, signingMode = "off", _mutateOptions }) {
+    const options = buildOptions({ workspace, canUseTool, systemPrompt, model, maxTurns, resume, signingMode });
     if (_mutateOptions) _mutateOptions(options);
     const queue = makeInputQueue();
     const q = query({ prompt: queue, options });

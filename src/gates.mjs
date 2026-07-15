@@ -1,6 +1,7 @@
 // canUseTool gate policy. `decide` is pure so tests never need a TTY; the
 // REPL supplies a readline prompter, tests supply a scripted one.
-import { normalize, dirname } from "node:path";
+import { normalize, dirname, basename } from "node:path";
+import { SIGN_PREFIX, SIGN_READS, SIGN_PREPARE_WRITES, SIGN_ACTS, allowedSignTools } from "./signing.mjs";
 
 export const PREFIX = "mcp__contract-ops__";
 
@@ -12,8 +13,8 @@ export const READ_ONLY = new Set([
   "catalog", "suite_status",
 ]);
 
-export function newSessionState() {
-  return { approvals: new Set() };
+export function newSessionState(signingMode = "off") {
+  return { approvals: new Set(), signingMode };
 }
 
 // Stable fingerprint of fill params so approving one fill doesn't silently
@@ -29,7 +30,36 @@ function renderArgv(args) {
   return args.map((a) => (/\s/.test(String(a)) ? JSON.stringify(String(a)) : String(a))).join(" ");
 }
 
+// Sign-tool policy (signing modes; see src/signing.mjs). Defense in depth:
+// mounting is already mode-restricted server-side, this re-checks at the gate.
+function decideSign(short, input, session) {
+  const mode = session.signingMode ?? "off";
+  if (mode === "off") {
+    return { kind: "deny", detail: "signing tools are disabled — enable with signing.mode in config AND --enable-signing at launch" };
+  }
+  if (!allowedSignTools(mode).includes(short)) {
+    return { kind: "deny", detail: `sign tool "${short}" is not available in signing mode "${mode}"` };
+  }
+  if (SIGN_READS.includes(short)) return { kind: "allow", detail: "read-only" };
+  if (SIGN_ACTS.includes(short)) {
+    // The signing act: TYPED confirmation, never y/N, never remembered. The
+    // challenge is the concrete target so the human confirms WHAT they sign.
+    const target = String(input.request_id ?? input.requestId ?? input.input ?? input.path ?? "").trim();
+    const challenge = target ? basename(target) : short;
+    return {
+      kind: "confirm", key: null, challenge,
+      detail: `${short} — SIGNING ACTION on "${target || "(no target given)"}". Legally meaningful; cannot be undone.`,
+    };
+  }
+  // preview / pdf_stamp_text / signer_reissue_token: mutating but recoverable.
+  const what = input.output ?? input.pdf ?? input.input ?? input.request_id ?? "";
+  return { kind: "confirm", key: null, detail: `${short} — sign-cli write operation${what ? ` on ${what}` : ""}` };
+}
+
 export function decide(toolName, input = {}, session = newSessionState()) {
+  if (typeof toolName === "string" && toolName.startsWith(SIGN_PREFIX)) {
+    return decideSign(toolName.slice(SIGN_PREFIX.length), input, session);
+  }
   if (typeof toolName !== "string" || !toolName.startsWith(PREFIX)) {
     return { kind: "deny", detail: `"${toolName}" is outside the contract-ops-agent enclosure — only contract-ops tools exist here` };
   }
@@ -68,7 +98,9 @@ export function decide(toolName, input = {}, session = newSessionState()) {
   return { kind: "confirm", key: null, detail: `${short} — unrecognized contract-ops tool` };
 }
 
-// prompter(toolName, input, detail) -> Promise<boolean>
+// prompter(toolName, input, detail, challenge?) -> Promise<boolean>
+// When `challenge` is set (signing acts), the prompter must require the human
+// to TYPE that value back — y/N is not sufficient consent for a signature.
 export function makeCanUseTool(session, prompter, onEvent = () => {}) {
   return async (toolName, input) => {
     const d = decide(toolName, input, session);
@@ -78,7 +110,7 @@ export function makeCanUseTool(session, prompter, onEvent = () => {}) {
     } else if (d.kind === "deny") {
       outcome = { behavior: "deny", message: d.detail };
     } else {
-      const approved = await prompter(toolName, input, d.detail);
+      const approved = await prompter(toolName, input, d.detail, d.challenge);
       if (approved) {
         if (d.key) session.approvals.add(d.key);
         outcome = { behavior: "allow", updatedInput: input };

@@ -118,8 +118,24 @@ property of construction — the tool list handed to the model is built *only*
 from the contract-ops MCP server; there are no built-ins to strip. The gate
 (layer 2) and the startup assertion (layer 3) are the same code on both paths.
 
-**Signing** is unreachable here by design — the loop ends at "ready for
-signature" and hands off to the human's sign-cli flow.
+**Signing** is unreachable by default — the loop ends at "ready for
+signature" and hands off to the human's sign-cli flow. Two opt-in modes
+soften this deliberately (design record: `docs/sign-mount-scope.md`); both
+require `"signing": {"mode": …}` in config **and** `--enable-signing` at
+launch:
+
+- `"prepare"` mounts sign-cli's own MCP server least-privilege (enforced by
+  sign-cli itself via `--read-only --tool …`): request tracking, audit/receipt
+  verification, signature/date-field detection, preview stamps. The signing
+  act does not exist in the session.
+- `"full"` adds the signing act (`sign`, `document`, `signer_decline`). Every
+  such action stops at a **typed gate**: you must type the exact target
+  (request id / file name) back — y/N is not consent for a signature, and
+  approvals are never remembered.
+
+In both modes the startup assertion accepts exactly that mode's sign tools
+and still fails on anything unexpected, and the `run` escape hatch keeps
+refusing sign mutations regardless.
 
 A provider failure never loses your session: transient errors (rate limits,
 network, 5xx) retry with backoff, anything else ends the *turn* with a clear
