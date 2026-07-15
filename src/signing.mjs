@@ -34,15 +34,17 @@ export function allowedSignTools(mode) {
   return [];
 }
 
-// argv for `sign mcp serve` per mode. In prepare mode the restriction is
-// enforced by sign-cli itself: --read-only blocks the signing act, and the
-// repeated --tool flags hide everything outside the whitelist (calls outside
-// it get UNKNOWN_TOOL) — least privilege by construction, not by gate.
+// argv for `sign mcp serve` per mode. BOTH modes pass the --tool whitelist so
+// the server only exposes what the mode allows (calls outside it get
+// UNKNOWN_TOOL) — least privilege by construction, and the enclosure
+// assertion's allowed list can never drift from the mount (a sign-cli upgrade
+// that adds tools cannot surprise-fail the session). prepare additionally
+// passes --read-only, blocking the signing act server-side.
 export function signServeArgs(mode) {
   const args = ["mcp", "serve"];
-  if (mode === "prepare") {
-    args.push("--read-only", "true");
-    for (const t of allowedSignTools("prepare")) args.push("--tool", t);
+  if (mode === "prepare") args.push("--read-only", "true");
+  if (mode === "prepare" || mode === "full") {
+    for (const t of allowedSignTools(mode)) args.push("--tool", t);
   }
   return args;
 }

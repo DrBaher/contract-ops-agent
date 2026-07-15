@@ -294,3 +294,16 @@ test("S8: wizard preset path — gemini with a pasted key, no providers block", 
     assert.equal(resolveProvider(cfg.model, cfg).id, "gemini");
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("S9: wizard keyless custom endpoint records keyOptional so startup doesn't refuse", async () => {
+  const { prepareModel } = await import("../src/providers/index.mjs");
+  const { env, dir } = tmpEnv();
+  try {
+    const ask = scriptAsk(["", "4", "locallm", "http://localhost:9999/v1", "", "some-model"]); // blank key
+    const cfg = await runSetup({ ask, env, cwd: "/w", checkBin: async () => true, runInstall: () => {}, out: () => {} });
+    assert.equal(cfg.providers.locallm.keyOptional, true, "blank key must record keyOptional");
+    // the startup preflight must accept it without any key present
+    const r = prepareModel(cfg.model, cfg, { ...env });
+    assert.equal(r.provider.id, "locallm");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

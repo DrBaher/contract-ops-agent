@@ -2,3 +2,5 @@ node_modules/
 transcripts/
 escape.txt
 workspace/*.pdf
+data/
+workspace/data/

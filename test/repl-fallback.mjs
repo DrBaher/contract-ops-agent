@@ -128,3 +128,72 @@ test("an exhausted fallback chain returns to the prompt with the session alive",
   assert.equal(a.sessions.length, 1, "no new session without fallbacks");
   assert.ok(!/falling back/.test(printed));
 });
+
+test("a session that THROWS falls back too (SDK-crash path)", async () => {
+  const a = fakeProvider("a", () => { throw new Error("SDK exploded mid-turn"); });
+  const b = fakeProvider("b", (t) => [
+    { type: "text", text: `B answers: ${t}` },
+    { type: "turn_end", meta: {} },
+  ]);
+  const printed = await runRepl({
+    providerA: a,
+    providers: { "b/m": b },
+    fallbacks: ["b/m"],
+    lines: ["do it", "/quit"],
+  });
+  assert.match(printed, /session failed: SDK exploded/);
+  assert.match(printed, /falling back to b\/m/);
+  assert.deepEqual(b.sessions[0].sent, ["do it"]);
+  assert.match(printed, /B answers: do it/);
+});
+
+test("fallback skips the ref that resolves to the provider that just failed", async () => {
+  const a = fakeProvider("a", () => FAIL_TURN);
+  const b = fakeProvider("b", (t) => [{ type: "text", text: `B: ${t}` }, { type: "turn_end", meta: {} }]);
+  const printed = await runRepl({
+    providerA: a,
+    providers: { "a/m": a, "b/m": b },
+    fallbacks: ["a/m", "b/m"], // first entry IS the dead current provider
+    lines: ["go", "/quit"],
+  });
+  assert.match(printed, /fallback a\/m skipped — it is the provider that just failed/);
+  assert.equal(a.sessions.length, 1, "must not restart on the dead provider");
+  assert.deepEqual(b.sessions[0].sent, ["go"]);
+});
+
+test("an exhausted configured chain says so instead of failing silently", async () => {
+  const a = fakeProvider("a", () => FAIL_TURN);
+  const printed = await runRepl({
+    providerA: a,
+    providers: {}, // every fallback ref is unresolvable
+    fallbacks: ["gone/x"],
+    lines: ["go", "/quit"],
+  });
+  assert.match(printed, /fallback gone\/x unavailable/);
+  assert.match(printed, /fallback chain exhausted — staying on a\/m/);
+});
+
+test("a resumed transcript's history is carried into a fallback seed", async () => {
+  const a = fakeProvider("a", () => FAIL_TURN);
+  const b = fakeProvider("b", (t) => [{ type: "text", text: `B: ${t}` }, { type: "turn_end", meta: {} }]);
+  const input = new PassThrough();
+  const output = new PassThrough();
+  let printed = "";
+  output.on("data", (c) => { printed += c.toString(); });
+  input.write("continue please\n/quit\n");
+  await startRepl({
+    provider: a, model: "m", workspace: "/w",
+    systemPromptFor: () => "sp",
+    transcript: { write() {} },
+    prepare: (ref) => { if (ref !== "b/m") throw new Error("no"); return { provider: b, model: "m" }; },
+    knownProviders: ["b/m"], fallbacks: ["b/m"],
+    resume: { seed: [{ role: "user", text: "earlier q" }, { role: "assistant", text: "earlier a" }], sessionId: "sess-x" },
+    input, output,
+  });
+  assert.deepEqual(b.sessions[0].opts.seed, [
+    { role: "user", text: "earlier q" },
+    { role: "assistant", text: "earlier a" },
+  ], "resumed history must reach the fallback provider");
+  assert.deepEqual(b.sessions[0].sent, ["continue please"]);
+  assert.match(printed, /B: continue please/);
+});

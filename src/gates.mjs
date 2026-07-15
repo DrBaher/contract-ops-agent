@@ -44,11 +44,17 @@ function decideSign(short, input, session) {
   if (SIGN_ACTS.includes(short)) {
     // The signing act: TYPED confirmation, never y/N, never remembered. The
     // challenge is the concrete target so the human confirms WHAT they sign.
+    // A degenerate target (e.g. "/" whose basename is "") must never yield an
+    // empty challenge — bare Enter would satisfy it — so fall back to the
+    // tool name, which is always non-empty.
     const target = String(input.request_id ?? input.requestId ?? input.input ?? input.path ?? "").trim();
-    const challenge = target ? basename(target) : short;
+    const challenge = (target ? basename(target).trim() : "") || short;
+    const what = target
+      ? `on "${target}"` // full path in the detail — the typed basename alone may be ambiguous
+      : "with NO explicit target (sign-cli will act on whatever it resolves)";
     return {
       kind: "confirm", key: null, challenge,
-      detail: `${short} — SIGNING ACTION on "${target || "(no target given)"}". Legally meaningful; cannot be undone.`,
+      detail: `${short} — SIGNING ACTION ${what}. Legally meaningful; cannot be undone.`,
     };
   }
   // preview / pdf_stamp_text / signer_reissue_token: mutating but recoverable.

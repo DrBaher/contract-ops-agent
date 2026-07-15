@@ -97,7 +97,11 @@ export const claudeProvider = {
               else if (b.type === "tool_use") yield { type: "tool_use", name: b.name, input: b.input };
             }
           } else if (m.type === "result") {
-            yield { type: "turn_end", meta: { subtype: m.subtype, turns: m.num_turns, cost: m.total_cost_usd, text: m.result } };
+            // Normalize SDK failure subtypes into the same meta.error the loop
+            // providers set — fallback chains key off it (max_turns is a cap,
+            // not a provider failure, so it doesn't count).
+            const failed = typeof m.subtype === "string" && m.subtype.startsWith("error") && m.subtype !== "error_max_turns";
+            yield { type: "turn_end", meta: { subtype: m.subtype, turns: m.num_turns, cost: m.total_cost_usd, text: m.result, ...(failed ? { error: true } : {}) } };
           }
         }
       },

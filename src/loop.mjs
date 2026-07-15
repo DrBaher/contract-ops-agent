@@ -77,10 +77,17 @@ export function startLoopSession({ workspace, systemPrompt, model, canUseTool, d
     async *events() {
       const clients = [];
       try {
+        // A tool server that hangs on startup must not wedge the session
+        // silently — cap every mount's connect.
+        const CONNECT_TIMEOUT_MS = 30_000;
+        const withTimeout = (p, what) => Promise.race([
+          p,
+          new Promise((_, reject) => setTimeout(() => reject(new Error(`${what} did not connect within ${CONNECT_TIMEOUT_MS / 1000}s`)), CONNECT_TIMEOUT_MS).unref?.()),
+        ]);
         try {
-          clients.push({ prefix: PREFIX, client: await _connect(workspace) });
+          clients.push({ prefix: PREFIX, client: await withTimeout(_connect(workspace), "the contract-ops server") });
           for (const m of extraMounts) {
-            clients.push({ prefix: m.prefix, client: await m.connect() });
+            clients.push({ prefix: m.prefix, client: await withTimeout(m.connect(), `the ${m.prefix} server`) });
           }
         } catch (e) {
           yield { type: "error", message: `could not start a tool server: ${describeError(e)}` };

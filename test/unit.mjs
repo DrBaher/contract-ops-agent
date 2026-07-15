@@ -514,3 +514,9 @@ test("makeAsker resolves closed when stdin ended before the interface existed", 
   const ask = makeAsker(fakeRl);
   assert.deepEqual(await ask("prompt> "), { closed: true });
 });
+
+test("V1: VERSION single-sources package.json", async () => {
+  const { VERSION } = await import("../src/version.mjs");
+  const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+  assert.equal(VERSION, pkg.version);
+});

@@ -83,7 +83,12 @@ test("E1: enclosure assertion accepts exactly the mode's sign tools", () => {
 });
 
 test("S1: serve args + double opt-in", () => {
-  assert.deepEqual(signServeArgs("full"), ["mcp", "serve"]);
+  // BOTH modes pass the --tool whitelist so mount and enclosure assertion can
+  // never drift (a sign-cli upgrade adding tools must not breach full mode).
+  const full = signServeArgs("full");
+  assert.ok(!full.includes("--read-only"), "full mode must not be read-only");
+  assert.equal(full.filter((a) => a === "--tool").length, allowedSignTools("full").length);
+  assert.ok(full.includes("sign"), "full mode whitelist includes the signing act");
   const prep = signServeArgs("prepare");
   assert.equal(prep[2], "--read-only");
   assert.ok(prep.filter((a) => a === "--tool").length === allowedSignTools("prepare").length);
@@ -214,6 +219,31 @@ test("LIVE2: real `sign mcp serve` in full mode exposes the signing act", { skip
     const names = mcp.tools.map((t) => t.name);
     assert.ok(names.includes("sign"));
     assert.ok(names.includes("request_show"));
+  } finally {
+    await mcp.close();
+    rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("G5: a degenerate signing target never yields an empty typed challenge", () => {
+  const sess = newSessionState("full");
+  for (const target of ["/", "//", "  "]) {
+    const d = decide(s("sign"), { path: target }, sess);
+    assert.equal(d.kind, "confirm");
+    assert.ok(d.challenge && d.challenge.trim().length > 0, `challenge for ${JSON.stringify(target)} must be non-empty`);
+  }
+  // no target at all → the tool name is the challenge
+  assert.equal(decide(s("document"), {}, sess).challenge, "document");
+});
+
+test("LIVE3: full-mode live catalog is a subset of the allowed list (no drift)", { skip: skipNoSign }, async () => {
+  const ws = mkdtempSync(join(tmpdir(), "coa-sign-"));
+  const mcp = await connectSign(ws, "full");
+  try {
+    const allowed = new Set(allowedSignTools("full"));
+    for (const t of mcp.tools) {
+      assert.ok(allowed.has(t.name), `live full-mode tool "${t.name}" is outside allowedSignTools("full") — enclosure would breach`);
+    }
   } finally {
     await mcp.close();
     rmSync(ws, { recursive: true, force: true });

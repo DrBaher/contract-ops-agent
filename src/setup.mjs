@@ -125,7 +125,9 @@ export async function runSetup({ ask, askSecret = ask, env = process.env, cwd = 
     if (key) { saveApiKey(envKey, key, env); auth = { mode: "api-key", envKey }; out("  Saved (chmod 600)."); }
     else { auth = { mode: "env", envKey }; }
     const m = (await ask("  Model id: ")).trim() || "default";
-    providers = { [name]: { baseUrl, apiKeyEnv: envKey } };
+    // A blank key means "this endpoint needs none" (a local server) — record
+    // keyOptional so the startup key preflight doesn't refuse to launch.
+    providers = { [name]: { baseUrl, apiKeyEnv: envKey, ...(key ? {} : { keyOptional: true }) } };
     model = `${name}/${m}`;
   } else if (pChoice === "2") {
     // OpenAI — API key only (subscription auth is a Claude-only path).

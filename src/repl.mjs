@@ -71,10 +71,10 @@ export function parseReplInput(raw) {
 }
 
 export const HELP_TEXT = `commands:
-  /help           show this help
+  /help           show this help (alias /?)
   /model          show the current model and available providers
   /model <ref>    switch model (e.g. /model openai/gpt-4o) — context resets
-  /quit           exit (Ctrl-D also works)
+  /quit           exit (aliases /exit, /q; Ctrl-D also works)
   Ctrl-C          interrupt the current turn (twice to exit)
 anything else is sent to the agent.`;
 
@@ -133,10 +133,12 @@ export async function startRepl({ provider, workspace, systemPromptFor, model, t
     try {
       if (challenge) {
         // Signing act: consent means TYPING the target back — y/N is not
-        // enough for a legally meaningful, irreversible action.
+        // enough for a legally meaningful, irreversible action. An empty
+        // answer NEVER approves, whatever the challenge is.
         const { answer, aborted, closed } = await ask(`\n⚖ gate: ${detail}\n  type "${challenge}" to approve (anything else declines): `, ctl.signal);
         if (aborted || closed) return false;
-        return String(answer).trim() === challenge;
+        const typed = String(answer).trim();
+        return typed.length > 0 && typed === challenge;
       }
       const { answer, aborted, closed } = await ask(`\n⚖ gate: ${detail}\n  approve? [y/N] `, ctl.signal);
       if (aborted || closed) return false;
@@ -146,7 +148,8 @@ export async function startRepl({ provider, workspace, systemPromptFor, model, t
       spinner.start(); // the turn is still running
     }
   };
-  const canUseTool = makeCanUseTool(newSessionState(signingMode), gatePrompter, (e) => transcript.write(e));
+  const gateState = newSessionState(signingMode);
+  const canUseTool = makeCanUseTool(gateState, gatePrompter, (e) => transcript.write(e));
 
   let cur = { provider, model };
   const refOf = (c) => c.provider.id + (c.model ? `/${c.model}` : "");
@@ -162,7 +165,10 @@ export async function startRepl({ provider, workspace, systemPromptFor, model, t
       const parsed = parseReplInput(r.answer);
       if (parsed.kind === "quit") return null;
       if (parsed.kind === "send") return { text: parsed.text, switched };
-      if (parsed.kind === "help") output.write(`${HELP_TEXT}\n`);
+      if (parsed.kind === "help") {
+        output.write(`${HELP_TEXT}\n`);
+        output.write(`session: model ${refOf(cur)}${signingMode !== "off" ? ` · signing ${signingMode}` : ""}${fallbacks.length ? ` · fallbacks ${fallbacks.join(" → ")}` : ""}\n`);
+      }
       else if (parsed.kind === "model") {
         if (!prepare) { output.write(`model: ${refOf(cur)} (switching not available here)\n`); continue; }
         if (!parsed.ref) {
@@ -172,6 +178,7 @@ export async function startRepl({ provider, workspace, systemPromptFor, model, t
         try {
           cur = prepare(parsed.ref);
           switched = true;
+          gateState.approvals.clear(); // "context resets" includes gate memory
           output.write(`[switched to ${refOf(cur)} — starts with your next message; context resets]\n`);
           transcript.write({ type: "model", ref: refOf(cur) });
         } catch (e) {
@@ -204,10 +211,53 @@ export async function startRepl({ provider, workspace, systemPromptFor, model, t
   // Fallback state: config.fallbacks refs are consumed left-to-right when a
   // turn ends in a terminal provider error. seedLog mirrors the successful
   // conversation (user/assistant text) so a fallback session can be re-seeded.
+  // It starts from the resumed transcript (when there is one) so a fallback
+  // right after a Claude --resume doesn't silently drop the prior history,
+  // and it's capped so failover can't blow the fallback model's context.
+  const MAX_SEED = 60;
   const fallbackQueue = [...fallbacks];
-  const seedLog = [];
+  const seedLog = [...(resume?.seed ?? [])].slice(-MAX_SEED);
   let lastUser = null;
   let turnTexts = [];
+  const appendSeed = (user, texts) => {
+    seedLog.push({ role: "user", text: user }, ...texts.map((t) => ({ role: "assistant", text: t })));
+    while (seedLog.length > MAX_SEED) seedLog.shift();
+    while (seedLog.length && seedLog[0].role !== "user") seedLog.shift(); // never start on a reply
+  };
+
+  // Fail over to the next viable fallback ref. On success, mutates cur /
+  // pending / resumeInfo and returns true — the caller restarts the session.
+  // Refs that resolve to the provider that JUST failed are skipped: falling
+  // back to a known-dead endpoint burns the slot for nothing.
+  const tryFallback = () => {
+    if (!prepare || !fallbacks.length || lastUser === null) return false;
+    let fell = false;
+    while (fallbackQueue.length) {
+      const ref = fallbackQueue.shift();
+      try {
+        const next = prepare(ref);
+        if (next.provider.id === cur.provider.id && (next.model ?? "") === (cur.model ?? "")) {
+          output.write(`[fallback ${ref} skipped — it is the provider that just failed]\n`);
+          continue;
+        }
+        cur = next;
+        fell = true;
+        break;
+      } catch (e) {
+        output.write(`[fallback ${ref} unavailable: ${e.message}]\n`);
+      }
+    }
+    if (!fell) {
+      output.write(`[fallback chain exhausted — staying on ${refOf(cur)}]\n`);
+      return false;
+    }
+    const noCarry = cur.provider.id === "claude" ? "; prior context can't be carried to claude" : "";
+    output.write(`[falling back to ${refOf(cur)} — replaying your last message${noCarry}]\n`);
+    transcript.write({ type: "model", ref: refOf(cur), fallback: true });
+    resumeInfo = { seed: [...seedLog] };
+    pending = lastUser;
+    return true;
+  };
   try {
     while (pending !== null) {
       const session = cur.provider.startSession({
@@ -273,25 +323,11 @@ export async function startRepl({ provider, workspace, systemPromptFor, model, t
             // A terminal provider failure triggers the fallback chain: switch
             // to the next viable ref, re-seed the conversation so far, and
             // replay the message the dead provider never answered.
-            if (ev.meta?.error && prepare) {
-              let fell = false;
-              while (fallbackQueue.length) {
-                const ref = fallbackQueue.shift();
-                try { cur = prepare(ref); fell = true; break; }
-                catch (e) { output.write(`[fallback ${ref} unavailable: ${e.message}]\n`); }
-              }
-              if (fell) {
-                const noCarry = cur.provider.id === "claude" ? "; prior context can't be carried to claude" : "";
-                output.write(`[falling back to ${refOf(cur)} — replaying your last message${noCarry}]\n`);
-                transcript.write({ type: "model", ref: refOf(cur), fallback: true });
-                resumeInfo = { seed: [...seedLog] };
-                pending = lastUser;
-                session.end();
-                break;
-              }
+            if (ev.meta?.error) {
+              if (tryFallback()) { session.end(); break; }
             } else if (lastUser) {
               // Only completed turns enter the fallback seed.
-              seedLog.push({ role: "user", text: lastUser }, ...turnTexts.map((t) => ({ role: "assistant", text: t })));
+              appendSeed(lastUser, turnTexts);
             }
             const next = await promptUser("\ncontract-ops-agent> ");
             if (next === null) { session.end(); break; }
@@ -303,6 +339,14 @@ export async function startRepl({ provider, workspace, systemPromptFor, model, t
             spinner.start();
           }
         }
+      } catch (e) {
+        // A session that THROWS (an SDK crash, a transport failure) gets the
+        // same fallback chance as a clean error turn — but an enclosure
+        // failure is never retried on another provider: fail closed.
+        if (String(e?.message ?? "").includes("Enclosure") || !fallbacks.length) throw e;
+        output.write(`\n[error] session failed: ${e?.message ?? e}\n`);
+        transcript.write({ type: "error", message: String(e?.message ?? e) });
+        if (!tryFallback()) throw e;
       } finally {
         try { session.end(); } catch { /* already ended */ }
       }

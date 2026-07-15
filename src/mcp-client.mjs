@@ -1,4 +1,5 @@
 import { createRequire } from "node:module";
+import { VERSION } from "./version.mjs";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
@@ -29,7 +30,7 @@ export async function connectMcp(workspace) {
     args: [resolveMcpServerPath()],
     env: mcpServerEnv(workspace),
   });
-  const client = new Client({ name: "contract-ops-agent", version: "0.3.0" }, { capabilities: {} });
+  const client = new Client({ name: "contract-ops-agent", version: VERSION }, { capabilities: {} });
   await client.connect(transport);
   const { tools } = await client.listTools();
   return {
@@ -65,7 +66,7 @@ export async function connectSign(workspace, mode) {
     cwd: workspace,
     env: signServerEnv(),
   });
-  const client = new Client({ name: "contract-ops-agent", version: "0.5.0" }, { capabilities: {} });
+  const client = new Client({ name: "contract-ops-agent", version: VERSION }, { capabilities: {} });
   try {
     await client.connect(transport);
     // sign-cli's catalog declares one outputSchema with type "array"
