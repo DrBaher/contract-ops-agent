@@ -60,14 +60,18 @@ export function parseReplInput(raw) {
   if (!text) return { kind: "empty" };
   if (text === "/quit" || text === "/exit" || text === "/q") return { kind: "quit" };
   if (text === "/help" || text === "/?") return { kind: "help" };
+  if (text === "/model") return { kind: "model" };
+  if (text.startsWith("/model ")) return { kind: "model", ref: text.slice("/model ".length).trim() };
   if (text.startsWith("/")) return { kind: "unknown", cmd: text.split(/\s+/)[0] };
   return { kind: "send", text };
 }
 
 export const HELP_TEXT = `commands:
-  /help   show this help
-  /quit   exit (Ctrl-D also works)
-  Ctrl-C  interrupt the current turn (twice to exit)
+  /help           show this help
+  /model          show the current model and available providers
+  /model <ref>    switch model (e.g. /model openai/gpt-4o) — context resets
+  /quit           exit (Ctrl-D also works)
+  Ctrl-C          interrupt the current turn (twice to exit)
 anything else is sent to the agent.`;
 
 // A single-line activity indicator so a long inference doesn't look like a
@@ -106,7 +110,11 @@ function turnFooter(meta, toolCount) {
 // transcript) and drives whatever `provider` hands back a normalized Session:
 //   events: { type: "enclosure", tools } | { "text", text } | { "tool_use", name, input }
 //         | { "notice", text } | { "error", message } | { "turn_end", meta }
-export async function startRepl({ provider, workspace, systemPrompt, model, transcript, input = process.stdin, output = process.stdout }) {
+// `prepare(ref) -> {provider, model}` (throws on bad ref / missing key) enables
+// /model switching; a switch ends the session and starts a fresh one — context
+// resets, the enclosure is re-verified. `systemPromptFor(providerId)` supplies
+// the (possibly provider-specific) system prompt for each session.
+export async function startRepl({ provider, workspace, systemPromptFor, model, transcript, prepare = null, knownProviders = [], input = process.stdin, output = process.stdout }) {
   const rl = readline.createInterface({ input, output });
   const ask = makeAsker(rl);
   const spinner = makeSpinner(output);
@@ -129,29 +137,45 @@ export async function startRepl({ provider, workspace, systemPrompt, model, tran
   };
   const canUseTool = makeCanUseTool(newSessionState(), gatePrompter, (e) => transcript.write(e));
 
+  let cur = { provider, model };
+  const refOf = (c) => c.provider.id + (c.model ? `/${c.model}` : "");
+
   // Prompt until we have something to send (or a quit). Commands are handled
-  // here — only real prose ever reaches the model.
+  // here — only real prose ever reaches the model. A /model switch updates
+  // `cur` and is reported back so the caller can restart the session.
   const promptUser = async (q) => {
+    let switched = false;
     for (;;) {
       const r = await ask(q);
       if (r.closed) return null; // Ctrl-D / EOF
       const parsed = parseReplInput(r.answer);
       if (parsed.kind === "quit") return null;
-      if (parsed.kind === "send") return parsed.text;
+      if (parsed.kind === "send") return { text: parsed.text, switched };
       if (parsed.kind === "help") output.write(`${HELP_TEXT}\n`);
+      else if (parsed.kind === "model") {
+        if (!prepare) { output.write(`model: ${refOf(cur)} (switching not available here)\n`); continue; }
+        if (!parsed.ref) {
+          output.write(`model: ${refOf(cur)}\nproviders: ${knownProviders.join(", ")}\nswitch with /model <provider[/model]>\n`);
+          continue;
+        }
+        try {
+          cur = prepare(parsed.ref);
+          switched = true;
+          output.write(`[switched to ${refOf(cur)} — starts with your next message; context resets]\n`);
+          transcript.write({ type: "model", ref: refOf(cur) });
+        } catch (e) {
+          output.write(`cannot switch: ${e.message}\n`);
+        }
+      }
       else if (parsed.kind === "unknown") output.write(`unknown command: ${parsed.cmd} (try /help)\n`);
       // empty → just re-prompt
     }
   };
 
-  const first = await promptUser("contract-ops-agent> ");
-  if (first === null) { if (!rl.closed) rl.close(); return; }
+  const r0 = await promptUser("contract-ops-agent> ");
+  if (r0 === null) { if (!rl.closed) rl.close(); return; }
 
-  const session = provider.startSession({ workspace, systemPrompt, model, canUseTool });
-  session.send(first);
-  transcript.write({ type: "user", text: first });
-  spinner.start();
-
+  let activeSession = null;
   let interrupted = false;
   rl.on("SIGINT", async () => {
     if (activeGateAbort) activeGateAbort.abort();
@@ -159,60 +183,79 @@ export async function startRepl({ provider, workspace, systemPrompt, model, tran
     interrupted = true;
     spinner.stop();
     output.write("\n[interrupting — Ctrl-C again to exit]\n");
-    try { await session.interrupt(); } catch { /* already idle */ }
+    try { await activeSession?.interrupt(); } catch { /* already idle */ }
   });
 
-  let verified = false;
-  let toolCount = 0; // tool calls in the current turn (for the footer)
+  // One iteration per session; a /model switch ends the session and loops with
+  // the pending message for the new provider.
+  let pending = r0.text;
   try {
-    for await (const ev of session.events()) {
-      spinner.stop();
-      // Harness-side diagnostics (retries, provider failures) are not model
-      // output — they may print before the enclosure is verified.
-      if (ev.type === "notice") {
-        output.write(`[${ev.text}]\n`);
-        transcript.write({ type: "notice", text: ev.text });
-        spinner.start();
-        continue;
-      }
-      if (ev.type === "error") {
-        output.write(`\n[error] ${ev.message}\n`);
-        transcript.write({ type: "error", message: ev.message });
-        spinner.start();
-        continue;
-      }
-      if (ev.type === "enclosure") {
-        const n = assertEnclosure({ tools: ev.tools });
-        verified = true;
-        output.write(`[enclosure verified: ${n} contract-ops tools, nothing else]\n`);
-        transcript.write({ type: "init", tools: ev.tools });
-        spinner.start();
-        continue;
-      }
-      // Fail closed: no model output before the enclosure is verified.
-      if (!verified) {
-        throw new Error("Enclosure not verified before model activity — refusing to continue.");
-      }
-      if (ev.type === "text") {
-        output.write(`\n${ev.text}\n`);
-        transcript.write({ type: "assistant", text: ev.text });
-        spinner.start();
-      } else if (ev.type === "tool_use") {
-        toolCount++;
-        output.write(`  ⚙ ${ev.name} ${JSON.stringify(ev.input)}\n`);
-        transcript.write({ type: "tool_use", tool: ev.name, input: ev.input });
-        spinner.start();
-      } else if (ev.type === "turn_end") {
-        if (ev.meta?.interrupted) output.write(`[turn interrupted]\n`);
-        output.write(`${turnFooter(ev.meta, toolCount)}\n`);
-        toolCount = 0;
-        interrupted = false;
-        transcript.write({ type: "result", ...ev.meta });
-        const next = await promptUser("\ncontract-ops-agent> ");
-        if (next === null) { session.end(); break; }
-        transcript.write({ type: "user", text: next });
-        session.send(next);
-        spinner.start();
+    while (pending !== null) {
+      const session = cur.provider.startSession({
+        workspace, systemPrompt: systemPromptFor(cur.provider.id), model: cur.model, canUseTool,
+      });
+      activeSession = session;
+      session.send(pending);
+      transcript.write({ type: "user", text: pending });
+      pending = null;
+      spinner.start();
+
+      let verified = false; // per session — every new enclosure is re-verified
+      let toolCount = 0;    // tool calls in the current turn (for the footer)
+      try {
+        for await (const ev of session.events()) {
+          spinner.stop();
+          // Harness-side diagnostics (retries, provider failures) are not model
+          // output — they may print before the enclosure is verified.
+          if (ev.type === "notice") {
+            output.write(`[${ev.text}]\n`);
+            transcript.write({ type: "notice", text: ev.text });
+            spinner.start();
+            continue;
+          }
+          if (ev.type === "error") {
+            output.write(`\n[error] ${ev.message}\n`);
+            transcript.write({ type: "error", message: ev.message });
+            spinner.start();
+            continue;
+          }
+          if (ev.type === "enclosure") {
+            const n = assertEnclosure({ tools: ev.tools });
+            verified = true;
+            output.write(`[enclosure verified: ${n} contract-ops tools, nothing else]\n`);
+            transcript.write({ type: "init", tools: ev.tools });
+            spinner.start();
+            continue;
+          }
+          // Fail closed: no model output before the enclosure is verified.
+          if (!verified) {
+            throw new Error("Enclosure not verified before model activity — refusing to continue.");
+          }
+          if (ev.type === "text") {
+            output.write(`\n${ev.text}\n`);
+            transcript.write({ type: "assistant", text: ev.text });
+            spinner.start();
+          } else if (ev.type === "tool_use") {
+            toolCount++;
+            output.write(`  ⚙ ${ev.name} ${JSON.stringify(ev.input)}\n`);
+            transcript.write({ type: "tool_use", tool: ev.name, input: ev.input });
+            spinner.start();
+          } else if (ev.type === "turn_end") {
+            if (ev.meta?.interrupted) output.write(`[turn interrupted]\n`);
+            output.write(`${turnFooter(ev.meta, toolCount)}\n`);
+            toolCount = 0;
+            interrupted = false;
+            transcript.write({ type: "result", ...ev.meta });
+            const next = await promptUser("\ncontract-ops-agent> ");
+            if (next === null) { session.end(); break; }
+            if (next.switched) { pending = next.text; session.end(); break; } // restart on the new provider
+            transcript.write({ type: "user", text: next.text });
+            session.send(next.text);
+            spinner.start();
+          }
+        }
+      } finally {
+        try { session.end(); } catch { /* already ended */ }
       }
     }
   } catch (e) {
@@ -224,7 +267,6 @@ export async function startRepl({ provider, workspace, systemPrompt, model, tran
     process.exitCode = 1;
   } finally {
     spinner.stop();
-    try { session.end(); } catch { /* already ended */ }
     if (!rl.closed) rl.close();
   }
 }

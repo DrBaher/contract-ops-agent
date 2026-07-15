@@ -1,5 +1,6 @@
 import { claudeProvider } from "./claude.mjs";
 import { openaiProvider, makeOpenAIProvider } from "./openai.mjs";
+import { loadApiKey } from "../config.mjs";
 
 // Built-in provider registry. A `provider/model` ref (OpenClaw-style) selects a
 // backend; each provider owns its own runtime (Claude via the Agent SDK to keep
@@ -65,4 +66,29 @@ export function modelFromRef(ref) {
   const parts = String(ref ?? "").split("/");
   const model = parts.length > 1 ? parts.slice(1).join("/") : "";
   return model || undefined; // "openai/" (empty model segment) → undefined, not ""
+}
+
+// Resolve a ref into a ready-to-start {provider, model}: loads the provider's
+// setup-stored key into the env if it isn't there, and fails fast when a
+// required key is missing. Used at startup AND for /model switching, so both
+// paths enforce the same auth preflight.
+export function prepareModel(ref, cfg = null, env = process.env) {
+  const provider = resolveProvider(ref, cfg);
+  const model = modelFromRef(ref) ?? provider.defaultModel;
+  for (const k of provider.envKeys) {
+    if (!env[k]) {
+      const stored = loadApiKey(k, env);
+      if (stored) env[k] = stored;
+    }
+  }
+  if (provider.id !== "claude" && !provider.keyOptional && !provider.envKeys.some((k) => env[k])) {
+    throw new Error(`no API key for "${provider.id}" — expected ${provider.envKeys.join(" or ")} in the environment or stored by setup`);
+  }
+  return { provider, model };
+}
+
+// Every provider id the user can switch to (core, presets, config endpoints).
+export function knownProviderIds(cfg = null) {
+  const custom = Object.entries(cfg?.providers ?? {}).filter(([, v]) => v?.baseUrl).map(([k]) => k);
+  return [...new Set([...RESERVED_PROVIDER_IDS, ...Object.keys(PRESET_ENDPOINTS), ...custom])];
 }

@@ -373,7 +373,7 @@ test("R1: parseReplInput routes commands, prose, and noise correctly", async () 
   assert.deepEqual(parseReplInput("/?"), { kind: "help" });
   assert.deepEqual(parseReplInput(""), { kind: "empty" });
   assert.deepEqual(parseReplInput("   "), { kind: "empty" });
-  assert.deepEqual(parseReplInput("/model gpt-4o"), { kind: "unknown", cmd: "/model" });
+  assert.deepEqual(parseReplInput("/nope gpt-4o"), { kind: "unknown", cmd: "/nope" });
   // A path-like leading slash is still a command shape — users must not
   // accidentally send "/etc/hosts" as a command; document the tradeoff:
   assert.equal(parseReplInput("/etc/hosts please").kind, "unknown");
@@ -420,4 +420,36 @@ test("SP1: buildSystemPrompt — Claude stays lean, loop providers get the tool-
   assert.equal(buildSystemPrompt("gemini"), SYSTEM_PROMPT + LOOP_ADDENDUM);
   assert.match(buildSystemPrompt("openai"), /Tool-use discipline/);
   assert.ok(buildSystemPrompt("openai").startsWith(SYSTEM_PROMPT), "addendum must extend, not replace");
+});
+
+test("R3: parseReplInput handles /model forms", async () => {
+  const { parseReplInput } = await import("../src/repl.mjs");
+  assert.deepEqual(parseReplInput("/model"), { kind: "model" });
+  assert.deepEqual(parseReplInput("/model openai/gpt-4o"), { kind: "model", ref: "openai/gpt-4o" });
+  assert.deepEqual(parseReplInput("/model  gemini "), { kind: "model", ref: "gemini" });
+});
+
+test("P6: prepareModel — resolves, loads stored keys, enforces the key preflight", async () => {
+  const { prepareModel, knownProviderIds } = await import("../src/providers/index.mjs");
+  const { mkdtempSync, rmSync: rm } = await import("node:fs");
+  const { tmpdir: td } = await import("node:os");
+  const { saveApiKey: save } = await import("../src/config.mjs");
+  const dir = mkdtempSync(join(td(), "coa-pm-"));
+  const env = { XDG_CONFIG_HOME: dir };
+  try {
+    // claude needs no key; ollama is key-optional
+    assert.equal(prepareModel(undefined, null, env).provider.id, "claude");
+    assert.equal(prepareModel("ollama/llama3.3", null, env).model, "llama3.3");
+    // a keyed provider without a key fails fast
+    assert.throws(() => prepareModel("openai/gpt-4o", null, { ...env }), /no API key for "openai"/);
+    // a setup-stored key is loaded into the env
+    save("GEMINI_API_KEY", "sk-gem", env);
+    const e2 = { ...env };
+    const r = prepareModel("gemini", null, e2);
+    assert.equal(r.model, "gemini-2.5-flash");
+    assert.equal(e2.GEMINI_API_KEY, "sk-gem", "stored key must be loaded into the env");
+    // known providers include core + presets + config endpoints
+    const known = knownProviderIds({ providers: { myllm: { baseUrl: "https://x/v1" } } });
+    for (const id of ["claude", "openai", "gemini", "ollama", "myllm"]) assert.ok(known.includes(id), id);
+  } finally { rm(dir, { recursive: true, force: true }); }
 });

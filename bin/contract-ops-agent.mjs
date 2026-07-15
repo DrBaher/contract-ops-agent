@@ -6,7 +6,7 @@ import { buildSystemPrompt } from "../src/system-prompt.mjs";
 import { Transcript } from "../src/transcript.mjs";
 import { preflight, renderPreflight } from "../src/preflight.mjs";
 import { startRepl, makeAsker } from "../src/repl.mjs";
-import { resolveProvider, modelFromRef } from "../src/providers/index.mjs";
+import { prepareModel, knownProviderIds } from "../src/providers/index.mjs";
 import { configState, configPath, applyAuth, configDir, migrateConfig } from "../src/config.mjs";
 import { runSetup } from "../src/setup.mjs";
 import { diagnose, renderDoctor, installPlan } from "../src/doctor.mjs";
@@ -99,23 +99,16 @@ if (cfg.auth?.mode === "claude-code" && process.env.ANTHROPIC_API_KEY) {
   console.warn("note: ANTHROPIC_API_KEY is set in your environment — it overrides your Claude Code subscription (this bills the API, not your plan). Unset it to use the subscription.");
 }
 const workspace = resolve(flag("--workspace") ?? cfg.workspace ?? process.cwd());
-let provider;
+// prepareModel resolves the ref, loads any setup-stored key into the env, and
+// fails fast on a missing key — the same preflight /model switching uses.
+let provider, model;
 try {
-  provider = resolveProvider(cfg.model, cfg);           // cfg.model: "provider/model" ref or undefined → claude
+  ({ provider, model } = prepareModel(cfg.model, cfg)); // cfg.model: "provider/model" ref or undefined → claude
 } catch (e) {
   console.error(`${e.message}\nEdit ${configPath()} or re-run \`contract-ops-agent setup\`.`);
   process.exit(1);
 }
-const model = flag("--model") ?? modelFromRef(cfg.model);
-
-// Preflight auth: a non-Claude provider strictly needs its key in the env (the
-// Claude path may instead ride a Claude Code login, and key-optional local
-// endpoints run without one, so those get no hard check).
-// Better a clear message now than a raw SDK crash on the first turn.
-if (provider.id !== "claude" && !provider.keyOptional && !provider.envKeys.some((k) => process.env[k])) {
-  console.error(`No API key found for provider "${provider.id}" — expected ${provider.envKeys.join(" or ")} in your environment or stored by setup.\nRun \`contract-ops-agent setup\` to configure auth.`);
-  process.exit(1);
-}
+if (flag("--model")) model = flag("--model");
 
 const transcript = new Transcript(join(workspace, "transcripts"));
 
@@ -126,4 +119,9 @@ console.log(`transcript: ${transcript.path}`);
 console.log(`config:     ${join(configDir(), "config.json")}`);
 console.log(`(type /help for commands, /quit to exit)\n`);
 
-await startRepl({ provider, workspace, systemPrompt: buildSystemPrompt(provider.id), model, transcript });
+await startRepl({
+  provider, workspace, model, transcript,
+  systemPromptFor: buildSystemPrompt,
+  prepare: (ref) => prepareModel(ref, cfg),
+  knownProviders: knownProviderIds(cfg),
+});
