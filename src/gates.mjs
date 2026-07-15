@@ -11,7 +11,19 @@ export const READ_ONLY = new Set([
   "contract_vault_query", "contract_vault_due", "contract_vault_risk",
   "verify_signature", "verify_receipt", "audit_show",
   "catalog", "suite_status",
+  // NDA negotiation — read-only views over a negotiation state file
+  "negotiate_status", "negotiate_review", "negotiate_diff", "negotiate_analyze", "negotiate_validate",
 ]);
+
+// NDA tools that WRITE a draft/config file but sign nothing — gated y/N, like
+// fill_template/convert_to_pdf. (negotiate_finalize only emits final docs from
+// an already-converged state; no new signature is applied.)
+const NDA_WRITES = new Set(["nda_setup", "generate_redlines", "draft_nda", "negotiate_finalize"]);
+
+// Negotiation acts that SIGN a round in the state file's hash chain — a binding
+// commitment. Gated with the SAME typed-consent discipline as sign-cli acts:
+// type the target back, interactive-TTY only, never remembered.
+const NEGOTIATE_SIGN_ACTS = new Set(["negotiate_init", "negotiate_counter", "negotiate_accept"]);
 
 export function newSessionState(signingMode = "off") {
   return { approvals: new Set(), signingMode };
@@ -89,6 +101,25 @@ export function decide(toolName, input = {}, session = newSessionState()) {
   const short = toolName.slice(PREFIX.length);
 
   if (READ_ONLY.has(short)) return { kind: "allow", detail: "read-only" };
+
+  if (NEGOTIATE_SIGN_ACTS.has(short)) {
+    // Signs a negotiation round (a binding commitment) — typed consent, TTY
+    // only, never remembered. The challenge is the concrete target: the state
+    // file for counter/accept, or the new state path for init.
+    const target = String(input.state ?? input.out ?? "").trim();
+    if (!target) {
+      return { kind: "deny", detail: `${short} — NEGOTIATION SIGNATURE with no state/out target given (refusing a blind commitment). Provide it and retry.` };
+    }
+    return {
+      kind: "confirm", key: null, challenge: target, requireInteractive: true,
+      detail: `${short} — NEGOTIATION SIGNATURE on "${target}". Commits/signs a round in the negotiation; not a legal e-signature (that stays with sign-cli).`,
+    };
+  }
+
+  if (NDA_WRITES.has(short)) {
+    const out = input.out ?? input.out_md ?? "";
+    return { kind: "confirm", key: null, detail: `${short} — NDA write${out ? ` → ${out}` : ""}${short === "nda_setup" ? " (one-time org policy in the workspace)" : ""}` };
+  }
 
   if (short === "fill_template") {
     if (!input.template) return { kind: "confirm", key: null, detail: "fill_template — missing template path" };

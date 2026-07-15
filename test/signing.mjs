@@ -315,3 +315,30 @@ test("LIVE3: full-mode live catalog is a subset of the allowed list (no drift)",
     rmSync(ws, { recursive: true, force: true });
   }
 });
+
+// --- NDA negotiation gate policy (review/redlines/draft/negotiate) ---
+test("N1: negotiation read-only views allow; writes confirm; sign acts need typed TTY consent", () => {
+  const t = (n) => `${PREFIX}${n}`;
+  const sess = newSessionState(); // signing mode irrelevant to negotiation
+  // read-only views
+  for (const v of ["negotiate_status", "negotiate_review", "negotiate_diff", "negotiate_analyze", "negotiate_validate"]) {
+    assert.equal(decide(t(v), { state: "neg.json" }, sess).kind, "allow", v);
+  }
+  // gated writes (y/N, no challenge)
+  for (const w of ["nda_setup", "generate_redlines", "draft_nda", "negotiate_finalize"]) {
+    const d = decide(t(w), { out: "x.md", state: "neg.json", out_md: "f.md" }, sess);
+    assert.equal(d.kind, "confirm", w);
+    assert.equal(d.challenge, undefined, `${w} is a y/N write, not typed`);
+  }
+  // signing acts — typed consent, TTY-only, challenge = the target, never remembered
+  const init = decide(t("negotiate_init"), { out: "neg.json", purpose: "x" }, sess);
+  assert.equal(init.kind, "confirm");
+  assert.equal(init.challenge, "neg.json", "init challenge is the new state path");
+  assert.equal(init.requireInteractive, true);
+  assert.equal(init.key, null);
+  const counter = decide(t("negotiate_counter"), { state: "deals/neg.json" }, sess);
+  assert.equal(counter.challenge, "deals/neg.json");
+  assert.match(counter.detail, /NEGOTIATION SIGNATURE/);
+  // a sign act with no target is denied, not blindly challenged
+  assert.equal(decide(t("negotiate_accept"), {}, sess).kind, "deny");
+});
