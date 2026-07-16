@@ -33,6 +33,7 @@ Usage:
                                                              migrates old configs, offers to install missing CLIs
   contract-ops-agent tool [<name> ['{json args}']]           list tools, or run one directly (no model;
                                                              contract-ops tools only — use sign-cli itself for signing)
+  contract-ops-agent usage                                   per-session turns / tools / tokens / cost from transcripts
 
 --enable-signing activates the signing.mode set in config (prepare | full) for
 this session; without the flag signing stays off. Fallback chains are the
@@ -104,6 +105,14 @@ if (sub === "doctor") {
       if (/^y(es)?$/i.test(a)) runInstall(installPlan(diag.missing).suite);
     });
   }
+  process.exit(0);
+}
+
+if (sub === "usage") {
+  const { summarizeTranscripts, renderUsage } = await import("../src/usage.mjs");
+  const cfgU = configState().config ?? {};
+  const wsU = resolve(flag("--workspace") ?? cfgU.workspace ?? process.cwd());
+  console.log(renderUsage(summarizeTranscripts(join(wsU, "transcripts"))));
   process.exit(0);
 }
 

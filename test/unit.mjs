@@ -527,3 +527,39 @@ test("V1: VERSION single-sources package.json", async () => {
   const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   assert.equal(VERSION, pkg.version);
 });
+
+test("U8: usage summary aggregates turns/tools/tokens/cost from transcripts", async () => {
+  const { summarizeTranscripts, renderUsage } = await import("../src/usage.mjs");
+  const { mkdtempSync, writeFileSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const dir = mkdtempSync(join(tmpdir(), "coa-usage-"));
+  try {
+    const jl = (rows) => rows.map((r) => JSON.stringify(r)).join("\n") + "\n";
+    writeFileSync(join(dir, "2026-01-01.jsonl"), jl([
+      { type: "user", text: "hi" },
+      { type: "tool_use", tool: "x" }, { type: "tool_use", tool: "y" },
+      { type: "result", usage: { input: 100, output: 20 } },
+      { type: "result", cost: 0.05 },
+    ]));
+    writeFileSync(join(dir, "2026-01-02.jsonl"), jl([
+      { type: "model", ref: "openai/gpt-4o" },
+      { type: "tool_use", tool: "z" },
+      { type: "result", usage: { input: 200, output: 40 } },
+    ]));
+    const sum = summarizeTranscripts(dir);
+    assert.equal(sum.sessions.length, 2);
+    assert.equal(sum.totals.sessions, 2);
+    assert.equal(sum.totals.turns, 3);
+    assert.equal(sum.totals.tools, 3);
+    assert.equal(sum.totals.inputTokens, 300);
+    assert.equal(sum.totals.outputTokens, 60);
+    assert.ok(Math.abs(sum.totals.costUsd - 0.05) < 1e-9);
+    assert.deepEqual(sum.sessions[1].models, ["openai/gpt-4o"]);
+    const text = renderUsage(sum);
+    assert.match(text, /TOTAL \(2 sessions\)/);
+    // empty dir → graceful
+    const empty = summarizeTranscripts(join(dir, "nope"));
+    assert.equal(empty.sessions.length, 0);
+    assert.match(renderUsage(empty), /no transcripts yet/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

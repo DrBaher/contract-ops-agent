@@ -2,6 +2,21 @@
 
 All notable changes to contract-ops-agent. Dates are release dates.
 
+## 0.11.0 — 2026-07-16
+
+- **`contract-ops-agent usage`** — a new subcommand that aggregates your
+  workspace transcripts into per-session and total turns / tools / tokens /
+  cost (loop providers report tokens, Claude reports USD).
+- **Cross-model eval** (`eval/cross-model.mjs` + `docs/model-eval.md`) — scores
+  a provider on the core workflow. First results: Claude and gpt-4o **5/5**;
+  local qwen2.5:7b **0/5** (the `ollama/` preset is wired correctly — the driver
+  parses its tool calls — but a 7B model is overwhelmed by the full 50-tool set;
+  use a larger local model or a cloud model).
+- **Test coverage** — a gate-coverage test asserts every one of the server's 50
+  tools is classified by the harness gate (no silent fallthrough), and the
+  server gained a schema-completeness test covering the previously-untested
+  legacy tools.
+
 ## 0.10.0 — 2026-07-15
 
 **Fuller vault coverage** (requires `contract-ops-mcp` ≥ 0.3.0)

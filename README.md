@@ -61,7 +61,12 @@ contract-ops-agent setup                                   (re)run the setup wiz
 contract-ops-agent doctor                                  check environment, auth, signing + fallback
                                                            config; migrate old configs; install missing CLIs
 contract-ops-agent tool [<name> ['{json}']]                list tools, or run one directly (no model)
+contract-ops-agent usage                                   per-session turns / tools / tokens / cost from transcripts
 ```
+
+Which models can actually drive it? See [`docs/model-eval.md`](docs/model-eval.md) —
+a cross-model eval (Claude and gpt-4o score 5/5; small local models are
+overwhelmed by the full tool set).
 
 In the REPL, type contract requests in plain language; `/help` lists commands;
 `/model` shows or switches the model mid-session (`/model gemini` — context
