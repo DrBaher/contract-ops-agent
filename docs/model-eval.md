@@ -33,7 +33,8 @@ node eval/cross-model.mjs ollama qwen2.5:7b     # local, no key
 |---|---|---|---|---|
 | **Claude** (Agent SDK default) | Claude | **5/5** | 5/5 | ~7–13s/scenario |
 | **gpt-4o** | OpenAI | **5/5** | 5/5 | ~3–5s/scenario |
-| **qwen2.5:7b** | Ollama (local) | **0/5** | 0/5 | emitted no tool calls in the full flow |
+| **qwen2.5:7b** | Ollama (local) | **0/5** | 0/5 | overwhelmed by 50 tools |
+| **qwen2.5:14b** | Ollama (local) | **0/5** | 0/5 | same ceiling as 7b — see the sweep below |
 
 ## What the Ollama result actually means (it's nuanced)
 
@@ -50,16 +51,46 @@ enclosure**. Frontier models (Claude, gpt-4o) select cleanly from 50 tools; a
 small local model does not. This is the empirical version of the tool-count
 tradeoff: more curated tools help capable models and hurt weak ones.
 
+## How many tools can a small model handle? (the ceiling sweep)
+
+`eval/tool-ceiling.mjs` isolates the variable: it asks the model to lint a file
+with **N** tools in context (always including the target `lint_contract`) and
+reports the hit rate over several trials. Results on a 16 GB machine
+(2026-07-16):
+
+| Tools in context | qwen2.5:7b | qwen2.5:14b |
+|---|---|---|
+| 5 | 3/3 | 2/2 |
+| 17 | 3/3 | 1/2 |
+| 25 | 3/3 | 2/2 |
+| 35 | **0/3** | **0/2** |
+| 50 (full product) | **0/3** | **0/2** |
+
+The striking result: **doubling the model (7B → 14B) did not raise the
+ceiling.** Both are reliable up to ~25 tools, both fall off a cliff by 35, and
+**both fail at the full 50.** So within the small-local range, the blocker is
+the number of tools in context, not model size — a bigger *small* model doesn't
+fix it. (Sample sizes are small and results are stochastic; the signal — a hard
+cliff between 25 and 35 — is consistent across both models and repeated runs.)
+
 ## Recommendations
 
-- **Cloud:** Claude or gpt-4o (or comparable) — both 5/5, use freely.
-- **Local (Ollama):** the preset is wired correctly, but use a **larger** model
-  than 7B (e.g. a 32B/70B-class instruct model with solid tool-calling) if you
-  want the local path to drive the full workflow. A 7B model may work for a
-  single-tool task but not the multi-tool flow.
-- **If small-model support becomes a goal:** the lever is reducing the tool
-  count the model sees per turn (tool-deferral / task-scoped tool subsets),
-  not the enclosure — which is independent of model strength.
+- **Cloud:** Claude or gpt-4o (or comparable) — both 5/5 at the full 50 tools,
+  use freely.
+- **Local (Ollama), full 50-tool surface:** a 7B or 14B model **won't** drive
+  it. The `ollama/` preset is wired correctly (its tool calls parse), but the
+  model can't select from 50 tools. Either:
+  - use a **much larger** local model (32B/70B-class, untested here — needs a
+    machine with ≥ ~32 GB RAM; run `node eval/cross-model.mjs ollama qwen2.5:32b`
+    to check), **or**
+  - **cap the tool set to ~20** for the small model — where a 7B is reliable.
+- **The real lever for small models** is reducing the tools the model sees per
+  turn (task-scoped tool subsets / deferral), independent of the enclosure. The
+  enclosure holds at any tool count; tool *selection* is what a small model
+  struggles with.
+
+Reproduce: `node eval/tool-ceiling.mjs <model> [points] [trials]` (local via
+Ollama by default; set `EVAL_BASE_URL` + `OPENAI_API_KEY` for a hosted model).
 
 Untested (no keys available at eval time): Gemini, Grok, DeepSeek, OpenRouter.
 Their dialect is the same OpenAI-compatible path that gpt-4o passed and the
