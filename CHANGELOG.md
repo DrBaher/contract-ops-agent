@@ -2,6 +2,14 @@
 
 All notable changes to contract-ops-agent. Dates are release dates.
 
+## 0.11.1 — 2026-07-17
+
+- **Local-model limitation is now surfaced to users**, not just in docs: the
+  setup wizard warns when you pick a local (Ollama) endpoint, and the agent
+  prints a one-line note at startup on any key-optional/local provider. Both
+  point at `docs/model-eval.md`. Decision: keep the full ~50-tool set (frontier
+  models handle it 5/5) and be upfront that small local models (7B–14B) can't.
+
 ## 0.11.0 — 2026-07-16
 
 - **`contract-ops-agent usage`** — a new subcommand that aggregates your

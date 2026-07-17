@@ -104,6 +104,13 @@ export async function runSetup({ ask, askSecret = ask, env = process.env, cwd = 
       name = "gemini";
     }
     const preset = PRESET_ENDPOINTS[name];
+    if (preset.keyOptional) {
+      // Local endpoints (Ollama) — warn about the tool-count ceiling: small
+      // local models can't drive the full ~50-tool set (see docs/model-eval.md).
+      out("  Heads up: the agent exposes ~50 tools, and small local models (7B–14B) can't");
+      out("  reliably pick from that many — use a large local model (32B+), or a cloud model");
+      out("  (Claude / OpenAI) for the full workflow. Details: docs/model-eval.md.");
+    }
     const envKey = preset.apiKeyEnv;
     if (env[envKey] && yes(await ask(`  Found ${envKey} in your environment — use it? [Y/n] `))) {
       auth = { mode: "env", envKey };

@@ -115,6 +115,14 @@ The harness implements no login flow of its own and never handles your
 credentials beyond storing a key you paste (masked) into setup. A missing key
 is caught at startup with a pointer to setup, not a mid-session crash.
 
+> **⚠️ Local models have a real limit.** The agent exposes ~50 tools, and
+> **small local models (7B–14B) can't reliably pick from that many** — in
+> testing, qwen2.5 7B *and* 14B both failed the full workflow (they call tools
+> fine with ≤ ~25 in context, then fall off a cliff). Frontier cloud models
+> (Claude, gpt-4o) handle all 50 cleanly (5/5). So for local/Ollama, use a
+> **large** model (32B+); otherwise prefer a cloud model. Full data and a
+> reproducible eval: [`docs/model-eval.md`](docs/model-eval.md).
+
 **Fallback chains:** list refs in config and the agent fails over
 mid-conversation when a provider dies (terminal errors only — rate limits
 just retry), replaying your unanswered message with the conversation

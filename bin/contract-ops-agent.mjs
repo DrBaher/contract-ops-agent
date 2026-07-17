@@ -186,6 +186,11 @@ if (argv.includes("--resume")) {
 
 console.log(renderPreflight(await preflight()));
 console.log(`provider:   ${provider.id}`);
+// Local endpoints (Ollama / a key-optional custom endpoint) commonly run small
+// models that can't drive the full ~50-tool set — flag it once at startup.
+if (provider.keyOptional) {
+  console.warn(`note: small local models struggle with the full ~50-tool set — prefer a 32B+ model, or a cloud model, for the whole workflow (docs/model-eval.md).`);
+}
 console.log(`workspace:  ${workspace}`);
 console.log(`transcript: ${transcript.path}`);
 console.log(`config:     ${join(configDir(), "config.json")}`);
